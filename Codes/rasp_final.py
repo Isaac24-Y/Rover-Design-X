@@ -159,4 +159,34 @@ def manejar_comando(cmd):
 def servidor_video():
     global frame_actual
     srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    srv.setsockopt(socket.SOL_SOCKET, so_
+    srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    srv.bind((SERVER_IP, TCP_PORT))
+    srv.listen(1)
+    print(f"[SERVIDOR] TCP escuchando video en {TCP_PORT}")
+
+    conn, addr = srv.accept()
+    print(f"[VIDEO] Cliente conectado: {addr}")
+
+    cap = cv2.VideoCapture(0)
+    while True:
+        if estado["camera"]:
+            ret, frame = cap.read()
+            if not ret:
+                break
+            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            frame_actual = frame.copy()
+            _, encoded = cv2.imencode(".jpg", frame)
+            data = encoded.tobytes()
+            conn.sendall(struct.pack("Q", len(data)) + data)
+        else:
+            time.sleep(0.1)
+
+    cap.release()
+    conn.close()
+
+# ────────────────────────────────────────────────
+# MAIN
+# ────────────────────────────────────────────────
+if __name__ == "__main__":
+    threading.Thread(target=servidor_udp, daemon=True).start()
+    servidor_video()
