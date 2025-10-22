@@ -19,13 +19,16 @@ BUFFER_SIZE = 1024
 # VARIABLES GLOBALES
 # ────────────────────────────────────────────────
 running = True
+recibiendo_video = False
 frame_actual = None
+client_socket = None
 
 # ────────────────────────────────────────────────
 # FUNCIÓN: Recibir video del servidor
 # ────────────────────────────────────────────────
 def recibir_video():
-    global frame_actual, running
+    global frame_actual, running, recibiendo_video, client_socket
+
     try:
         client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         client_socket.connect((SERVER_IP, TCP_PORT))
@@ -36,9 +39,11 @@ def recibir_video():
 
     data = b""
     payload_size = struct.calcsize("Q")
+    recibiendo_video = True
 
-    while running:
+    while running and recibiendo_video:
         try:
+            # Recibir tamaño del frame
             while len(data) < payload_size:
                 packet = client_socket.recv(4096)
                 if not packet:
@@ -51,23 +56,30 @@ def recibir_video():
             data = data[payload_size:]
             msg_size = struct.unpack("Q", packed_msg_size)[0]
 
+            # Recibir el frame completo
             while len(data) < msg_size:
                 data += client_socket.recv(4096)
 
             frame_data = data[:msg_size]
             data = data[msg_size:]
-            frame = np.frombuffer(frame_data, dtype=np.uint8)
-            frame = cv2.imdecode(frame, cv2.IMREAD_GRAYSCALE)
 
-            frame = cv2.cvtColor(frame, cv2.COLOR_GRAY2RGB)
-            frame_actual = ImageTk.PhotoImage(Image.fromarray(frame))
-            video_label.config(image=frame_actual)
-            video_label.image = frame_actual
+            # Decodificar el frame
+            frame = np.frombuffer(frame_data, dtype=np.uint8)
+            frame = cv2.imdecode(frame, cv2.IMREAD_COLOR)  # ← Color, no gris
+            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+
+            # Convertir a formato para Tkinter
+            img = Image.fromarray(frame)
+            imgtk = ImageTk.PhotoImage(image=img)
+            video_label.imgtk = imgtk
+            video_label.config(image=imgtk)
+
         except Exception as e:
             print(f"[ERROR VIDEO LOOP] {e}")
             break
 
-    client_socket.close()
+    if client_socket:
+        client_socket.close()
     print("[CLIENTE] Video cerrado.")
 
 
@@ -75,6 +87,8 @@ def recibir_video():
 # FUNCIÓN: Enviar comandos UDP al servidor
 # ────────────────────────────────────────────────
 def enviar_comando(comando):
+    global recibiendo_video
+
     try:
         UDPClient = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         UDPClient.settimeout(3)
@@ -89,6 +103,16 @@ def enviar_comando(comando):
 
     response_label.config(text=f"{respuesta}", foreground="blue")
 
+    # Acciones según comando
+    if comando == "START_CAMERA":
+        if not recibiendo_video:
+            threading.Thread(target=recibir_video, daemon=True).start()
+            recibiendo_video = True
+
+    elif comando == "STOP_CAMERA":
+        recibiendo_video = False
+
+    # Estado visual
     if "✅" in respuesta:
         status_label.config(text=respuesta, foreground="green")
     elif "🛑" in respuesta or "⛔" in respuesta:
@@ -101,9 +125,11 @@ def enviar_comando(comando):
 # FUNCIÓN: Cerrar cliente
 # ────────────────────────────────────────────────
 def cerrar_cliente():
-    global running
+    global running, recibiendo_video
     running = False
+    recibiendo_video = False
     ventana.destroy()
+
 
 # ────────────────────────────────────────────────
 # INTERFAZ GRÁFICA
@@ -130,7 +156,6 @@ control_frame.pack(side="right", fill="y", padx=10, pady=10)
 
 tk.Label(control_frame, text="Panel de Control", font=("Arial", 16, "bold")).pack(pady=10)
 
-# ─ Botones de control ─
 botones = [
     ("Iniciar Cámara", "START_CAMERA"),
     ("Detener Cámara", "STOP_CAMERA"),
@@ -151,24 +176,17 @@ for texto, comando in botones:
                    command=lambda c=comando: enviar_comando(c))
     b.pack(pady=4)
 
-# ─ Estado del sistema ─
 status_label = tk.Label(control_frame, text="Sistema inactivo",
                         bg="#f5f5f5", fg="gray", font=("Arial", 12, "bold"))
 status_label.pack(pady=10)
 
-# ─ Respuesta del servidor ─
 separator = ttk.Separator(control_frame, orient='horizontal')
 separator.pack(fill='x', pady=10)
 
 response_label = tk.Label(control_frame, text="", bg="#f5f5f5", font=("Arial", 10))
 response_label.pack(pady=5)
 
-# ─ Botón de salida ─
 ttk.Button(control_frame, text="Salir", command=cerrar_cliente).pack(pady=15)
 
-# ─ Iniciar hilo de video ─
-threading.Thread(target=recibir_video, daemon=True).start()
-
-# ─ Ejecutar GUI ─
 ventana.protocol("WM_DELETE_WINDOW", cerrar_cliente)
 ventana.mainloop()
