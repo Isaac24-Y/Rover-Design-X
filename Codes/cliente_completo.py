@@ -11,6 +11,7 @@ import time
 # Configuración del servidor
 # ────────────────────────────────────────────────
 SERVER_IP = "172.32.214.66"  # IP de la Raspberry Pi
+SERVER_IP = '192.168.1.10'  # IP del servidor (Raspberry Pi)
 UDP_PORT = 50000             # Comandos y sensor
 TCP_PORT = 50001             # Video
 BUFFER_SIZE = 1024
