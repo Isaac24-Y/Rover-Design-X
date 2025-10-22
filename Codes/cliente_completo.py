@@ -1,6 +1,7 @@
 import socket, struct, cv2, numpy as np, threading, time
 
-SERVER_IP = "172.32.214.66"
+SERVER_IP = '192.168.1.10'  # IP del servidor (Raspberry Pi)
+#SERVER_IP = "172.32.214.66"
 UDP_PORT = 50000
 TCP_PORT = 50001
 BUFFER_SIZE = 1024
