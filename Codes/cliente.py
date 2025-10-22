@@ -11,6 +11,10 @@ TCP_PORT = 50001             # Puerto de video
 BUFFER_SIZE = 1024
 
 
+# ─ Variables de estado ─
+guardando = False
+
+
 # ─ Función para recibir el video ─
 def recibir_video():
     client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -39,6 +43,12 @@ def recibir_video():
 
             frame = np.frombuffer(frame_data, dtype=np.uint8)
             frame = cv2.imdecode(frame, cv2.IMREAD_COLOR)
+
+            # Muestra si se está guardando
+            if guardando:
+                cv2.putText(frame, "GUARDANDO DATOS...", (20, 40),
+                            cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+
             cv2.imshow("Video desde Raspberry Pi", frame)
 
             if cv2.waitKey(1) & 0xFF == ord('q'):
@@ -53,15 +63,17 @@ def recibir_video():
         print("[CLIENTE] Video cerrado.")
 
 
-# ─ Función para enviar comandos por UDP ─
+# ─ Función para enviar comandos ─
 def enviar_comandos():
+    global guardando
     UDPClient = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    UDPClient.settimeout(3)
     print(f"[CLIENTE] Enviando comandos a {SERVER_IP}:{UDP_PORT}")
 
     while True:
-        comando = input("Escribe comando ('servo1', 'temperatura', 'luz', 'dc', 'q' para salir): ").strip()
+        comando = input("Escribe comando ('servo1', 'temperatura', 'luz', 'dc', 'guardar', 'detener', 'q' para salir): ").strip()
         if comando.lower() == 'q':
-            print("Saliendo...")
+            print("Saliendo del cliente...")
             break
 
         bytesToSend = comando.encode('utf-8')
@@ -70,9 +82,17 @@ def enviar_comandos():
         try:
             data, address = UDPClient.recvfrom(BUFFER_SIZE)
             data = data.decode('utf-8')
-            print('Respuesta del servidor:', data)
+            print(f"[SERVIDOR] {data}")
         except socket.timeout:
-            print("No se recibió respuesta del servidor.")
+            print("⚠️ No se recibió respuesta del servidor.")
+
+        # Actualizar estado local de guardado
+        if comando.lower() == "guardar":
+            guardando = True
+            print("[CLIENTE] 🟢 Guardado de datos iniciado.")
+        elif comando.lower() == "detener":
+            guardando = False
+            print("[CLIENTE] 🔴 Guardado de datos detenido.")
 
     UDPClient.close()
 
@@ -83,7 +103,7 @@ if __name__ == "__main__":
     hilo_video = threading.Thread(target=recibir_video, daemon=True)
     hilo_video.start()
 
-    # Hilo para enviar comandos
+    # Enviar comandos desde consola
     enviar_comandos()
 
     print("[CLIENTE] Finalizado.")
