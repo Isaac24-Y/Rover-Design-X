@@ -4,148 +4,134 @@ import cv2
 import numpy as np
 import threading
 import tkinter as tk
+from tkinter import ttk
 from PIL import Image, ImageTk
 import os
 import time
 import csv
 
-# ────────────────────────────────────────────────
-# Configuración
-# ────────────────────────────────────────────────
+# ─ CONFIGURACIÓN ─
 SERVER_IP = "172.32.214.66"
 UDP_PORT = 50000
 TCP_PORT = 50001
 BUFFER_SIZE = 1024
-
 SAVE_DIR = "client_data"
-os.makedirs(SAVE_DIR, exist_ok=True)
-CSV_FILE = os.path.join(SAVE_DIR, "sensores.csv")
+os.makedirs(SAVE_DIR,exist_ok=True)
+CSV_FILE = os.path.join(SAVE_DIR,"sensores.csv")
 
-# ─ Variables globales
-frame_actual = None
+# ─ VARIABLES GLOBALES ─
 guardando = False
 running = True
+frame_actual = None
 
-# ────────────────────────────────────────────────
-# Recibir video TCP
-# ────────────────────────────────────────────────
+# ─ FUNCIÓN VIDEO ─
 def recibir_video():
-    global frame_actual, running, guardando
-    try:
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.connect((SERVER_IP, TCP_PORT))
-        data = b""
-        payload_size = struct.calcsize("Q")
-    except Exception as e:
-        print("[ERROR] No se pudo conectar al servidor de video:", e)
-        return
-
+    global frame_actual, running
+    client_socket = socket.socket(socket.AF_INET,socket.SOCK_STREAM)
+    client_socket.connect((SERVER_IP,TCP_PORT))
+    data = b""
+    payload_size = struct.calcsize("Q")
     while running:
         try:
-            while len(data) < payload_size:
-                packet = sock.recv(4096)
-                if not packet:
-                    running = False
-                    break
+            while len(data)<payload_size:
+                packet = client_socket.recv(4096)
+                if not packet: break
                 data += packet
-            if not running: break
-
+            if not data: break
             packed_msg_size = data[:payload_size]
             data = data[payload_size:]
-            msg_size = struct.unpack("Q", packed_msg_size)[0]
-
-            while len(data) < msg_size:
-                data += sock.recv(4096)
+            msg_size = struct.unpack("Q",packed_msg_size)[0]
+            while len(data)<msg_size:
+                data += client_socket.recv(4096)
             frame_data = data[:msg_size]
             data = data[msg_size:]
-
-            frame = np.frombuffer(frame_data, dtype=np.uint8)
+            frame = np.frombuffer(frame_data,dtype=np.uint8)
             frame = cv2.imdecode(frame, cv2.IMREAD_COLOR)
-
-            # Guardar frame si está activado
+            frame_actual = frame.copy()
+            frame_rgb = cv2.cvtColor(frame,cv2.COLOR_BGR2RGB)
+            imgtk = ImageTk.PhotoImage(Image.fromarray(frame_rgb))
+            video_label.config(image=imgtk)
+            video_label.image = imgtk
             if guardando:
-                timestamp = time.strftime("%Y%m%d_%H%M%S_%f")
-                img_file = os.path.join(SAVE_DIR, f"{timestamp}.png")
-                cv2.imwrite(img_file, frame)
-                # Guardar CSV
-                with open(CSV_FILE, 'a', newline='') as f:
-                    writer = csv.writer(f)
-                    writer.writerow([timestamp, img_file])
-                    f.flush()
+                cv2.putText(frame_rgb,"GUARDANDO DATOS...",(20,40),
+                            cv2.FONT_HERSHEY_SIMPLEX,1,(0,255,0),2)
+        except: break
+    client_socket.close()
 
-            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            frame_actual_img = ImageTk.PhotoImage(Image.fromarray(frame_rgb))
-            frame_actual = frame_actual_img
-            video_label.config(image=frame_actual)
-            video_label.image = frame_actual
-
-        except Exception as e:
-            print("[ERROR VIDEO LOOP]", e)
-            break
-    sock.close()
-
-# ────────────────────────────────────────────────
-# Enviar comando UDP
-# ────────────────────────────────────────────────
-def enviar_comando(cmd):
+# ─ FUNCIÓN COMANDOS ─
+def enviar_comando(comando):
     global guardando
+    UDPClient = socket.socket(socket.AF_INET,socket.SOCK_DGRAM)
+    UDPClient.settimeout(3)
+    UDPClient.sendto(comando.encode(),(SERVER_IP,UDP_PORT))
     try:
-        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        sock.settimeout(3)
-        sock.sendto(cmd.encode(), (SERVER_IP, UDP_PORT))
-        data, _ = sock.recvfrom(BUFFER_SIZE)
-        resp = data.decode()
-        sock.close()
-        response_label.config(text=resp)
-    except:
-        response_label.config(text="Sin respuesta del servidor.")
+        data,_ = UDPClient.recvfrom(BUFFER_SIZE)
+        respuesta = data.decode()
+    except: respuesta = "Sin respuesta"
+    response_label.config(text=respuesta)
+    if comando=="guardar":
+        guardando=True
+        status_label.config(text="🟢 Guardando datos...",foreground="green")
+        threading.Thread(target=guardar_frame_csv,daemon=True).start()
+    elif comando=="detener":
+        guardando=False
+        status_label.config(text="🔴 Guardado detenido",foreground="red")
+    UDPClient.close()
 
-    if cmd.lower() == "guardar":
-        guardando = True
-        status_label.config(text="🟢 Guardando datos", fg="green")
-    elif cmd.lower() == "detener":
-        guardando = False
-        status_label.config(text="🔴 Guardado detenido", fg="red")
+# ─ FUNCIÓN GUARDADO FRAME+CSV ─
+def guardar_frame_csv():
+    global guardando, frame_actual
+    with open(CSV_FILE,'a',newline='') as f:
+        writer = csv.writer(f)
+        if os.stat(CSV_FILE).st_size==0:
+            writer.writerow(["Tiempo","Frame"])
+        while guardando:
+            if frame_actual is not None:
+                timestamp = time.strftime("%Y%m%d_%H%M%S")
+                img_path = os.path.join(SAVE_DIR,f"{timestamp}.png")
+                cv2.imwrite(img_path, frame_actual)
+                writer.writerow([timestamp,img_path])
+                f.flush()
+            time.sleep(0.5)
 
-# ────────────────────────────────────────────────
-# GUI
-# ────────────────────────────────────────────────
-root = tk.Tk()
-root.title("Cliente Optimizado")
-root.geometry("800x600")
+# ─ CERRAR GUI ─
+def cerrar_cliente():
+    global running
+    running=False
+    ventana.destroy()
 
-video_label = tk.Label(root, bg="black", width=640, height=480)
-video_label.pack()
+# ─ INTERFAZ ─
+ventana = tk.Tk()
+ventana.title("Cliente RPi")
+ventana.geometry("1000x600")
 
-frame_control = tk.Frame(root)
-frame_control.pack(pady=10)
+main_frame = ttk.Frame(ventana)
+main_frame.pack(fill="both",expand=True)
 
-botones = [
-    ("Servo 1", "servo1"),
-    ("DC Motor", "dc"),
-    ("Guardar", "guardar"),
-    ("Detener", "detener"),
-    ("Stop Motores", "stop")
-]
+video_frame = ttk.Frame(main_frame)
+video_frame.pack(side="left",fill="both",expand=True,padx=10,pady=10)
+video_label = tk.Label(video_frame,bg="black",width=640,height=480)
+video_label.pack(expand=True)
 
-for txt, cmd in botones:
-    tk.Button(frame_control, text=txt, width=15,
-              command=lambda c=cmd: enviar_comando(c)).pack(side="left", padx=5)
+control_frame = ttk.Frame(main_frame)
+control_frame.pack(side="right",fill="y",padx=15,pady=10)
+ttk.Label(control_frame,text="Panel de Control",font=("Arial",16,"bold")).pack(pady=10)
 
-status_label = tk.Label(root, text="🔴 Guardado detenido", fg="red")
-status_label.pack(pady=5)
+botones = [("Servo 1","servo1"),("DC Motor","dc"),("Derecha","derecha"),
+           ("Izquierda","izquierda"),("Guardar","guardar"),("Detener","detener")]
 
-response_label = tk.Label(root, text="", fg="blue")
+for txt,cmd in botones:
+    ttk.Button(control_frame,text=txt,width=15,command=lambda c=cmd:enviar_comando(c)).pack(pady=4)
+
+status_label = tk.Label(control_frame,text="🔴 Guardado detenido",fg="red",font=("Arial",12,"bold"))
+status_label.pack(pady=8)
+
+response_label = tk.Label(control_frame,text="",font=("Arial",10))
 response_label.pack(pady=5)
 
-# ─ Hilos
-threading.Thread(target=recibir_video, daemon=True).start()
+ttk.Button(control_frame,text="Salir",command=cerrar_cliente).pack(pady=15)
 
-# ─ Cierre
-def cerrar():
-    global running
-    running = False
-    root.destroy()
-root.protocol("WM_DELETE_WINDOW", cerrar)
-
-root.mainloop()
+# ─ INICIAR HILO VIDEO ─
+threading.Thread(target=recibir_video,daemon=True).start()
+ventana.protocol("WM_DELETE_WINDOW",cerrar_cliente)
+ventana.mainloop()
