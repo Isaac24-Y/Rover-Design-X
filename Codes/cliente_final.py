@@ -1,194 +1,174 @@
-#!/usr/bin/env python3
-import socket, threading, struct, cv2, numpy as np, csv, os, time, json
+import socket
+import struct
+import cv2
+import numpy as np
+import threading
+import tkinter as tk
+from tkinter import ttk, messagebox
+from PIL import Image, ImageTk
 
-# ---------- CONFIG ----------
-SERVER_IP = "172.32.214.66"  # cambia por la IP de tu Raspberry Pi
+# ────────────────────────────────────────────────
+# CONFIGURACIÓN
+# ────────────────────────────────────────────────
+SERVER_IP = "172.32.214.66"  # ← Cambia por la IP real de la Raspberry Pi
 UDP_PORT = 50000
 TCP_PORT = 50001
-BUFFER_SIZE = 4096
+BUFFER_SIZE = 1024
 
-SAVE_DIR = "client_saved"
-os.makedirs(SAVE_DIR, exist_ok=True)
-CSV_FILE = os.path.join(SAVE_DIR, "saved_data.csv")
+# ────────────────────────────────────────────────
+# VARIABLES GLOBALES
+# ────────────────────────────────────────────────
+running = True
+frame_actual = None
 
-# Estados locales
-camera_on = False
-sensor_on = False
-guardar = False
-
-# Último valor sensor recibido (thread-safe)
-sensor_lock = threading.Lock()
-latest_sensor = {"ldr": "", "temp": ""}
-
-# ---------- HELPER ----------
-def append_csv_row(timestamp, width, height, analog_voltage, img_name):
-    if not os.path.exists(CSV_FILE):
-        with open(CSV_FILE, 'w', newline='') as f:
-            writer = csv.writer(f)
-            # Columns requested: pixelsU, pixelsV, Analog Voltage, timestamp (plus filename)
-            writer.writerow(["timestamp", "pixelsU", "pixelsV", "AnalogVoltage", "image"])
-    with open(CSV_FILE, 'a', newline='') as f:
-        writer = csv.writer(f)
-        writer.writerow([timestamp, width, height, analog_voltage, img_name])
-
-# ---------- THREAD: recibir video (color) ----------
+# ────────────────────────────────────────────────
+# FUNCIÓN: Recibir video del servidor
+# ────────────────────────────────────────────────
 def recibir_video():
-    global camera_on, guardar
+    global frame_actual, running
     try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        s.connect((SERVER_IP, TCP_PORT))
-        data = b""
-        payload_size = struct.calcsize("Q")
-        camera_on = True
-        print("[VIDEO CLIENT] Conectado al servidor de video.")
-        while camera_on:
-            # recibir tamaño
+        client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        client_socket.connect((SERVER_IP, TCP_PORT))
+        print(f"[CLIENTE] ✅ Conectado al servidor de video en {SERVER_IP}:{TCP_PORT}")
+    except Exception as e:
+        messagebox.showerror("Error de conexión", f"No se pudo conectar al servidor de video:\n{e}")
+        return
+
+    data = b""
+    payload_size = struct.calcsize("Q")
+
+    while running:
+        try:
             while len(data) < payload_size:
-                packet = s.recv(4096)
+                packet = client_socket.recv(4096)
                 if not packet:
-                    camera_on = False
+                    print("[CLIENTE] ⚠️ Servidor de video desconectado.")
+                    running = False
                     break
                 data += packet
-            if not camera_on:
-                break
+
             packed_msg_size = data[:payload_size]
             data = data[payload_size:]
             msg_size = struct.unpack("Q", packed_msg_size)[0]
+
             while len(data) < msg_size:
-                packet = s.recv(4096)
-                if not packet:
-                    break
-                data += packet
+                data += client_socket.recv(4096)
+
             frame_data = data[:msg_size]
             data = data[msg_size:]
-
-            # Decodificar color
             frame = np.frombuffer(frame_data, dtype=np.uint8)
-            frame = cv2.imdecode(frame, cv2.IMREAD_COLOR)
-            if frame is None:
-                continue
+            frame = cv2.imdecode(frame, cv2.IMREAD_GRAYSCALE)
 
-            # Mostrar indicación de guardado
-            display_frame = frame.copy()
-            if guardar:
-                cv2.putText(display_frame, "GUARDANDO DATOS...", (10, 30),
-                            cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+            frame = cv2.cvtColor(frame, cv2.COLOR_GRAY2RGB)
+            frame_actual = ImageTk.PhotoImage(Image.fromarray(frame))
+            video_label.config(image=frame_actual)
+            video_label.image = frame_actual
+        except Exception as e:
+            print(f"[ERROR VIDEO LOOP] {e}")
+            break
 
-            cv2.imshow("Video (Color) - Raspberry Pi", display_frame)
-            key = cv2.waitKey(1) & 0xFF
-            if key == ord('q'):
-                camera_on = False
-                break
+    client_socket.close()
+    print("[CLIENTE] Video cerrado.")
 
-            # Si guardamos, escribir frame y fila CSV
-            if guardar:
-                # Obtener latest sensor value (atomic)
-                with sensor_lock:
-                    ldr = latest_sensor.get("ldr", "")
-                timestamp = time.strftime("%Y%m%d_%H%M%S_%f")
-                h, w = frame.shape[:2]
-                img_name = f"frame_{timestamp}.png"
-                img_path = os.path.join(SAVE_DIR, img_name)
-                # Guardar imagen color (PNG)
-                cv2.imwrite(img_path, frame)
-                # Append CSV: timestamp, pixelsU(width), pixelsV(height), AnalogVoltage, image file
-                append_csv_row(timestamp, w, h, ldr, img_path)
 
-        s.close()
-        cv2.destroyAllWindows()
-        print("[VIDEO CLIENT] Video cerrado.")
+# ────────────────────────────────────────────────
+# FUNCIÓN: Enviar comandos UDP al servidor
+# ────────────────────────────────────────────────
+def enviar_comando(comando):
+    try:
+        UDPClient = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        UDPClient.settimeout(3)
+        UDPClient.sendto(comando.encode('utf-8'), (SERVER_IP, UDP_PORT))
+        data, _ = UDPClient.recvfrom(BUFFER_SIZE)
+        respuesta = data.decode('utf-8')
+        UDPClient.close()
+    except socket.timeout:
+        respuesta = "⚠️ Sin respuesta del servidor."
     except Exception as e:
-        print("[ERROR VIDEO CLIENT]", e)
+        respuesta = f"❌ Error: {e}"
 
-# ---------- THREAD: recibir sensor UDP ----------
-def recibir_sensor():
-    global sensor_on, latest_sensor
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    # Bind a any port: server will send sensor data to client IP:port used when it asked sensor.
-    # We listen on a dedicated local port (UDP_PORT+2) for sensor data
-    LOCAL_SENSOR_PORT = UDP_PORT + 2
-    sock.bind(('', LOCAL_SENSOR_PORT))
-    print(f"[SENSOR CLIENT] Escuchando sensor UDP en puerto local {LOCAL_SENSOR_PORT}")
-    sensor_on = True
-    while sensor_on:
-        try:
-            data, addr = sock.recvfrom(BUFFER_SIZE)
-            text = data.decode()
-            # Esperamos JSON del servidor: {"ldr":"x.xx","temp":"y.yy"}
-            try:
-                js = json.loads(text)
-                with sensor_lock:
-                    latest_sensor["ldr"] = js.get("ldr", "")
-                    latest_sensor["temp"] = js.get("temp", "")
-                # Si estamos guardando, we do NOT append here; saving is triggered by frames in recibir_video
-                # but you could also choose to log here if needed.
-                print(f"[SENSOR CLIENT] LDR={latest_sensor['ldr']}  TEMP={latest_sensor['temp']}")
-            except Exception as e:
-                print("[SENSOR CLIENT] Mensaje no JSON:", text)
-        except Exception as e:
-            print("[ERROR SENSOR CLIENT]", e)
-            break
-    sock.close()
+    response_label.config(text=f"{respuesta}", foreground="blue")
 
-# ---------- FUNCION: enviar comandos UDP (y recibir status) ----------
-def enviar_comandos():
-    global guardar, camera_on, sensor_on
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sock.settimeout(3)
+    if "✅" in respuesta:
+        status_label.config(text=respuesta, foreground="green")
+    elif "🛑" in respuesta or "⛔" in respuesta:
+        status_label.config(text=respuesta, foreground="red")
+    else:
+        status_label.config(text="ℹ️ " + respuesta, foreground="gray")
 
-    print("Comandos disponibles:")
-    print(" start camera | stop camera")
-    print(" start sensor | stop sensor")
-    print(" start dc     | stop dc")
-    print(" start servo  | stop servo")
-    print(" save-data    | stop save")
-    print(" status       (consulta estados)")
-    print(" q            (salir)\n")
 
-    while True:
-        cmd = input("Comando: ").strip()
-        if cmd.lower() == 'q':
-            # asegurar detener guardado y cerrar hilos
-            guardar = False
-            camera_on = False
-            sensor_on = False
-            break
+# ────────────────────────────────────────────────
+# FUNCIÓN: Cerrar cliente
+# ────────────────────────────────────────────────
+def cerrar_cliente():
+    global running
+    running = False
+    ventana.destroy()
 
-        try:
-            sock.sendto(cmd.encode(), (SERVER_IP, UDP_PORT))
-            data, addr = sock.recvfrom(BUFFER_SIZE)
-            # Esperamos JSON con estado
-            try:
-                resp = json.loads(data.decode())
-                print("[SERVIDOR] Respuesta:", resp)
-                # actualizar local flags según respuesta
-                status = resp.get("status", {})
-                camera_on = status.get("camera_on", camera_on)
-                sensor_on = status.get("sensor_on", sensor_on)
-                # guardar flag enlazado al comando save-data
-                if cmd.lower() in ("save-data", "guardar"):
-                    guardar = True
-                elif cmd.lower() in ("stop save", "stop save-data", "detener"):
-                    guardar = False
-            except Exception:
-                print("[SERVIDOR] (no-json) ", data.decode())
-        except socket.timeout:
-            print("[ERROR] Timeout esperando respuesta del servidor.")
-        except Exception as e:
-            print("[ERROR] Enviando comando:", e)
+# ────────────────────────────────────────────────
+# INTERFAZ GRÁFICA
+# ────────────────────────────────────────────────
+ventana = tk.Tk()
+ventana.title("Cliente Raspberry Pi - Arduino")
+ventana.geometry("1050x600")
+ventana.configure(bg="#f5f5f5")
 
-    sock.close()
+# ─ Panel principal ─
+main_frame = ttk.Frame(ventana)
+main_frame.pack(fill="both", expand=True, padx=10, pady=10)
 
-# ---------- MAIN ----------
-if __name__ == "__main__":
-    # Iniciar hilo sensor (escucha local). Important: the server will send sensor data to the client's address/port it received when starting sensor.
-    t_sensor = threading.Thread(target=recibir_sensor, daemon=True)
-    t_sensor.start()
+# ─ Panel de video ─
+video_frame = ttk.Frame(main_frame)
+video_frame.pack(side="left", fill="both", expand=True)
 
-    # Iniciar hilo de video (abre conexión TCP al servidor cuando se ejecuta)
-    t_video = threading.Thread(target=recibir_video, daemon=True)
-    t_video.start()
+video_label = tk.Label(video_frame, bg="black", width=640, height=480)
+video_label.pack(padx=10, pady=10)
 
-    # Iniciar loop de comandos en main thread (entrada del usuario)
-    enviar_comandos()
-    print("[CLIENT] Finalizado. Asegúrate de detener camera/sensor en el servidor si aún están activos.")
+# ─ Panel de control ─
+control_frame = ttk.Frame(main_frame)
+control_frame.pack(side="right", fill="y", padx=10, pady=10)
+
+tk.Label(control_frame, text="Panel de Control", font=("Arial", 16, "bold")).pack(pady=10)
+
+# ─ Botones de control ─
+botones = [
+    ("Iniciar Cámara", "START_CAMERA"),
+    ("Detener Cámara", "STOP_CAMERA"),
+    ("Iniciar Lectura", "START_ANALOG"),
+    ("Detener Lectura", "STOP_ANALOG"),
+    ("Iniciar DC Motor", "START_DC"),
+    ("Detener DC Motor", "STOP_DC"),
+    ("Iniciar Servo", "START_SERVO"),
+    ("Detener Servo", "STOP_SERVO"),
+    ("Guardar Datos", "SAVE-DATA")
+]
+
+boton_frame = ttk.Frame(control_frame)
+boton_frame.pack(pady=10)
+
+for texto, comando in botones:
+    b = ttk.Button(boton_frame, text=texto, width=20,
+                   command=lambda c=comando: enviar_comando(c))
+    b.pack(pady=4)
+
+# ─ Estado del sistema ─
+status_label = tk.Label(control_frame, text="Sistema inactivo",
+                        bg="#f5f5f5", fg="gray", font=("Arial", 12, "bold"))
+status_label.pack(pady=10)
+
+# ─ Respuesta del servidor ─
+separator = ttk.Separator(control_frame, orient='horizontal')
+separator.pack(fill='x', pady=10)
+
+response_label = tk.Label(control_frame, text="", bg="#f5f5f5", font=("Arial", 10))
+response_label.pack(pady=5)
+
+# ─ Botón de salida ─
+ttk.Button(control_frame, text="Salir", command=cerrar_cliente).pack(pady=15)
+
+# ─ Iniciar hilo de video ─
+threading.Thread(target=recibir_video, daemon=True).start()
+
+# ─ Ejecutar GUI ─
+ventana.protocol("WM_DELETE_WINDOW", cerrar_cliente)
+ventana.mainloop()
