@@ -1,85 +1,75 @@
 #include <Servo.h>
 
-// Pines
-const int LDR_PIN = A0;       // Sensor de luz
-const int DC_MOTOR_PIN = 5;   // Motor DC (PWM)
-const int SERVO_PIN = 9;      // Servomotor
-
-// Objetos
+// ────────────── Configuración de pines ──────────────
 Servo servoMotor;
+int pos = 0;
 
-// Variables
-bool lectura_analogica = false;
-bool motor_dc_activo = false;
-bool servo_activo = false;
+const int pinTemp = A0;   // Sensor LM35
+const int pinLuz  = A1;   // LDR
+const int pinDC   = 3;    // PWM Motor DC
+const int motor_A = 5;
+const int motor_B = 6;
 
-unsigned long ultimo_envio = 0;
-const unsigned long intervalo_envio = 500;  // Enviar cada 0.5 segundos
+String comando;
 
 void setup() {
   Serial.begin(9600);
-  pinMode(LDR_PIN, INPUT);
-  pinMode(DC_MOTOR_PIN, OUTPUT);
-  servoMotor.attach(SERVO_PIN);
+  servoMotor.attach(9);
+  servoMotor.write(pos);
 
-  Serial.println("Arduino listo ✅");
+  pinMode(pinDC, OUTPUT);
+  pinMode(motor_A, OUTPUT);
+  pinMode(motor_B, OUTPUT);
+
+  Serial.println("Listo para recibir comandos.");
 }
 
 void loop() {
-  // ─── Recepción de comandos ───
-  if (Serial.available()) {
-    String comando = Serial.readStringUntil('\n');
+  if (Serial.available() > 0) {
+    comando = Serial.readStringUntil('\n');
     comando.trim();
 
-    if (comando == "START_ANALOG") {
-      lectura_analogica = true;
-      Serial.println("ACK_ANALOG_ON");
+    if (comando == "servo1") {
+      pos += 20;
+      if (pos > 180) pos = 0;
+      servoMotor.write(pos);
+      Serial.println("Servo movido a pos: " + String(pos));
     } 
-    else if (comando == "STOP_ANALOG") {
-      lectura_analogica = false;
-      Serial.println("ACK_ANALOG_OFF");
+    else if (comando == "temperatura") {
+      int lectura = analogRead(pinTemp);
+      float temperatura = lectura * 5.0 / 1023.0 * 100.0; // LM35: 10 mV/°C
+      Serial.print(temperatura, 2);
+      Serial.println(" °C");
     } 
-    else if (comando == "START_DC") {
-      motor_dc_activo = true;
-      Serial.println("ACK_DC_ON");
+    else if (comando == "luz") {
+      int lectura = analogRead(pinLuz);
+      float luz = lectura * 5.0 / 1023.0;
+      Serial.print(luz, 2);
+      Serial.println(" V");
     } 
-    else if (comando == "STOP_DC") {
-      motor_dc_activo = false;
-      analogWrite(DC_MOTOR_PIN, 0);
-      Serial.println("ACK_DC_OFF");
+    else if (comando == "derecha") {
+      analogWrite(motor_A, 255);
+      digitalWrite(motor_B, 0);
+      Serial.println("Motor girando a la derecha.");
     } 
-    else if (comando == "START_SERVO") {
-      servo_activo = true;
-      Serial.println("ACK_SERVO_ON");
+    else if (comando == "izquierda") {
+      analogWrite(motor_B, 255);
+      digitalWrite(motor_A, 0);
+      Serial.println("Motor girando a la izquierda.");
     } 
-    else if (comando == "STOP_SERVO") {
-      servo_activo = false;
-      Serial.println("ACK_SERVO_OFF");
+    else if (comando == "dc") {
+      analogWrite(pinDC, 255);
+      Serial.println("Motor DC activado.");
+    } 
+    else if (comando == "stop") {
+      analogWrite(pinDC, 0);
+      digitalWrite(motor_A, 0);
+      digitalWrite(motor_B, 0);
+      Serial.println("Motores detenidos.");
+    } 
+    else {
+      Serial.println("Comando inválido.");
     }
-  }
-
-  // ─── Enviar lectura del LDR ───
-  if (lectura_analogica && millis() - ultimo_envio > intervalo_envio) {
-    ultimo_envio = millis();
-    int valor = analogRead(LDR_PIN);
-    Serial.print("LDR:");
-    Serial.println(valor);
-  }
-
-  // ─── Control del motor DC ───
-  if (motor_dc_activo) {
-    analogWrite(DC_MOTOR_PIN, 180); // Velocidad media
-  }
-
-  // ─── Movimiento del servo ───
-  if (servo_activo) {
-    for (int angulo = 0; angulo <= 180; angulo += 10) {
-      servoMotor.write(angulo);
-      delay(15);
-    }
-    for (int angulo = 180; angulo >= 0; angulo -= 10) {
-      servoMotor.write(angulo);
-      delay(15);
-    }
+    delay(50); // Pequeña pausa para evitar saturación serial
   }
 }
