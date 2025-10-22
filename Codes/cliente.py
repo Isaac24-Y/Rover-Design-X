@@ -4,48 +4,56 @@ import cv2
 import numpy as np
 import threading
 
-SERVER_IP = '172.32.214.66'  # Cambia a la IP de tu Raspberry
-UDP_PORT = 50000
-TCP_PORT_1 = 50001
-TCP_PORT_2 = 50002
+# ─ Configuración del servidor ─
+SERVER_IP = '192.168.1.10'  # IP del servidor (Raspberry Pi)
+UDP_PORT = 50000             # Puerto de comandos
+TCP_PORT = 50001             # Puerto de video
 BUFFER_SIZE = 1024
 
-# ─ Recibir video ─
-def recibir_video(port, window_name):
-    client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    client_socket.connect((SERVER_IP, port))
-    print(f"[CLIENTE] Conectado a {SERVER_IP}:{port}")
 
+# ─ Función para recibir el video ─
+def recibir_video():
+    client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    client_socket.connect((SERVER_IP, TCP_PORT))
     data = b""
     payload_size = struct.calcsize("Q")
+    print(f"[CLIENTE] Conectado al servidor de video {SERVER_IP}:{TCP_PORT}")
 
-    while True:
-        while len(data) < payload_size:
-            packet = client_socket.recv(4096)
-            if not packet:
-                print(f"[{window_name}] Conexión cerrada.")
-                return
-            data += packet
+    try:
+        while True:
+            while len(data) < payload_size:
+                packet = client_socket.recv(4096)
+                if not packet:
+                    print("[CLIENTE] Conexión de video cerrada por el servidor.")
+                    return
+                data += packet
 
-        packed_msg_size = data[:payload_size]
-        data = data[payload_size:]
-        msg_size = struct.unpack("Q", packed_msg_size)[0]
+            packed_msg_size = data[:payload_size]
+            data = data[payload_size:]
+            msg_size = struct.unpack("Q", packed_msg_size)[0]
 
-        while len(data) < msg_size:
-            data += client_socket.recv(4096)
-        frame_data = data[:msg_size]
-        data = data[msg_size:]
+            while len(data) < msg_size:
+                data += client_socket.recv(4096)
+            frame_data = data[:msg_size]
+            data = data[msg_size:]
 
-        frame = np.frombuffer(frame_data, dtype=np.uint8)
-        frame = cv2.imdecode(frame, cv2.IMREAD_COLOR)
-        cv2.imshow(window_name, frame)
+            frame = np.frombuffer(frame_data, dtype=np.uint8)
+            frame = cv2.imdecode(frame, cv2.IMREAD_COLOR)
+            cv2.imshow("Video desde Raspberry Pi", frame)
 
-        if cv2.waitKey(1) & 0xFF == ord('q'):
-            break
+            if cv2.waitKey(1) & 0xFF == ord('q'):
+                break
 
-    client_socket.close()
+    except Exception as e:
+        print(f"[ERROR VIDEO] {e}")
 
-# ─ Enviar comandos UDP ─
+    finally:
+        client_socket.close()
+        cv2.destroyAllWindows()
+        print("[CLIENTE] Video cerrado.")
+
+
+# ─ Función para enviar comandos por UDP ─
 def enviar_comandos():
     UDPClient = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     print(f"[CLIENTE] Enviando comandos a {SERVER_IP}:{UDP_PORT}")
@@ -56,14 +64,26 @@ def enviar_comandos():
             print("Saliendo...")
             break
 
-        UDPClient.sendto(comando.encode('utf-8'), (SERVER_IP, UDP_PORT))
-        data, _ = UDPClient.recvfrom(BUFFER_SIZE)
-        print("Respuesta:", data.decode('utf-8'))
+        bytesToSend = comando.encode('utf-8')
+        UDPClient.sendto(bytesToSend, (SERVER_IP, UDP_PORT))
+
+        try:
+            data, address = UDPClient.recvfrom(BUFFER_SIZE)
+            data = data.decode('utf-8')
+            print('Respuesta del servidor:', data)
+        except socket.timeout:
+            print("No se recibió respuesta del servidor.")
 
     UDPClient.close()
 
+
 # ─ Main ─
 if __name__ == "__main__":
-    threading.Thread(target=recibir_video, args=(TCP_PORT_1, "Camara 1"), daemon=True).start()
-    threading.Thread(target=recibir_video, args=(TCP_PORT_2, "Camara 2"), daemon=True).start()
+    # Hilo para recibir video
+    hilo_video = threading.Thread(target=recibir_video, daemon=True)
+    hilo_video.start()
+
+    # Hilo para enviar comandos
     enviar_comandos()
+
+    print("[CLIENTE] Finalizado.")

@@ -5,66 +5,55 @@ import time
 import cv2
 import serial
 
-# ─ Configuración general ─
-SERVER_IP = '0.0.0.0'
-COMMAND_PORT = 50000  # UDP para comandos Arduino
-VIDEO_PORT_1 = 50001  # TCP para cámara 1
-VIDEO_PORT_2 = 50002  # TCP para cámara 2
+# ─ Puertos y configuración ─
+COMMAND_PORT = 50000  # UDP
+VIDEO_PORT   = 50001  # TCP
+SERVER_IP   = '0.0.0.0'
 BUFFER_SIZE = 1024
 
-# ─ Conexión al Arduino ─
 arduino_port = '/dev/ttyACM0'
 baud_rate = 9600
-try:
-    ser = serial.Serial(arduino_port, baud_rate, timeout=1)
-    time.sleep(2)
-    print(f"✅ Conectado a Arduino en {arduino_port}")
-except Exception as e:
-    ser = None
-    print(f"⚠️ No se pudo conectar al Arduino: {e}")
+ser = serial.Serial(arduino_port, baud_rate, timeout=1)
+time.sleep(2)
+print(f"Conectado a Arduino en {arduino_port}")
 
 # ─ Función para enviar comandos al Arduino ─
 def arduino(men):
-    if ser is None:
-        print("⚠️ Arduino no conectado.")
-        return
-
     comando = men.lower()
     if comando in ['servo1', 'temperatura', 'luz', 'dc']:
         ser.write(comando.encode())
-        print(f"📤 Comando '{comando}' enviado.")
+        print(f"Comando '{comando}' enviado.")
         time.sleep(0.1)
         if ser.in_waiting > 0:
             respuesta = ser.readline().decode().strip()
-            print(f"📥 Respuesta Arduino: {respuesta}")
+            print(f"Respuesta de Arduino: {respuesta}")
     else:
-        print("❌ Comando no válido.")
+        print("Comando no válido.")
 
-# ─ Función UDP para recibir comandos ─
+# ─ Función para recibir mensajes UDP ─
 def mensaje_udp():
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.bind((SERVER_IP, COMMAND_PORT))
     print(f"[SERVER] Escuchando comandos UDP en {SERVER_IP}:{COMMAND_PORT}")
-
     while True:
         msg, addr = sock.recvfrom(BUFFER_SIZE)
         msg = msg.decode('utf-8').strip()
-        print(f"[COMANDO] '{msg}' de {addr}")
+        print(f"[COMANDO] {msg} de {addr}")
         sock.sendto(b"OK", addr)
         arduino(msg)
 
-# ─ Función TCP para enviar video de una cámara ─
-def camara_tcp(cam_index, port):
+# ─ Función para enviar video TCP ─
+def camara_tcp():
     srv_vid = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     srv_vid.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    srv_vid.bind((SERVER_IP, port))
+    srv_vid.bind((SERVER_IP, VIDEO_PORT))
     srv_vid.listen(1)
-    print(f"[SERVER] Cámara {cam_index} esperando conexión en puerto {port}...")
+    print(f"[SERVER] Video TCP en {SERVER_IP}:{VIDEO_PORT}")
 
     conn_vid, addr_v = srv_vid.accept()
-    print(f"[SERVER] Cliente conectado a cámara {cam_index} desde {addr_v}")
+    print(f"[SERVER] Cliente de video conectado: {addr_v}")
 
-    cap = cv2.VideoCapture(cam_index, cv2.CAP_V4L2)
+    cap = cv2.VideoCapture(0, cv2.CAP_V4L2)
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
     cap.set(cv2.CAP_PROP_FPS, 30)
@@ -73,30 +62,24 @@ def camara_tcp(cam_index, port):
     while True:
         ret, frame = cap.read()
         if not ret:
-            print(f"[CAM {cam_index}] No se pudo leer frame.")
             break
-
         _, encimg = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 70])
         data = encimg.tobytes()
         try:
             conn_vid.sendall(struct.pack("Q", len(data)) + data)
         except:
-            print(f"[CAM {cam_index}] Cliente desconectado.")
+            print("[SERVER] Cliente de video desconectado.")
             break
 
     cap.release()
     conn_vid.close()
     srv_vid.close()
 
-# ─ Main ─
+# ─ Hilos ─
 if __name__ == "__main__":
-    # Hilo de comandos
     threading.Thread(target=mensaje_udp, daemon=True).start()
+    threading.Thread(target=camara_tcp, daemon=True).start()
 
-    # Hilos de cámaras
-    threading.Thread(target=camara_tcp, args=(0, VIDEO_PORT_1), daemon=True).start()
-    threading.Thread(target=camara_tcp, args=(1, VIDEO_PORT_2), daemon=True).start()
-
-    print("🎥 Servidor de cámaras iniciado.")
+    # Mantener el main vivo
     while True:
         time.sleep(1)
