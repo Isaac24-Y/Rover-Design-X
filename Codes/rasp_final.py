@@ -7,194 +7,141 @@ import serial
 import csv
 import os
 
-# ─ CONFIGURACIÓN GENERAL ─
+# ─────────────────────────────
+# Configuración general
+# ─────────────────────────────
 ARDUINO_PORT = '/dev/ttyACM0'
 BAUD_RATE = 9600
 BUFFER_SIZE = 1024
 SERVER_IP = '0.0.0.0'
 UDP_PORT = 50000
 TCP_PORT = 50001
-SAVE_DIR = "server_data"
+SAVE_DIR = "data"
 os.makedirs(SAVE_DIR, exist_ok=True)
-CSV_FILE = os.path.join(SAVE_DIR, "sensores.csv")
 
-# ─ ESTADOS GLOBALES ─
-camera_on = False
-sensor_on = False
-dc_on = False
-servo_on = False
-saving_data = False
+guardar_datos = False
 ser = None
-ultimo_frame = None
+frame_actual = None
 
-# ─ CONEXIÓN CON ARDUINO ─
+# ─────────────────────────────
+# Conexión Arduino
+# ─────────────────────────────
 try:
     ser = serial.Serial(ARDUINO_PORT, BAUD_RATE, timeout=1)
     time.sleep(2)
-    print(f"[SERVIDOR] Conectado a Arduino en {ARDUINO_PORT}")
+    print(f"[SERVIDOR] ✅ Conectado a Arduino en {ARDUINO_PORT}")
 except Exception as e:
     print("[ERROR] No se pudo conectar al Arduino:", e)
 
-# ─ FUNCIONES AUXILIARES ─
+# ─────────────────────────────
+# Funciones auxiliares
+# ─────────────────────────────
 def enviar_a_arduino(comando):
-    global ser
+    global guardar_datos
+    comando = comando.strip().lower()
     if not ser or not ser.is_open:
         return "Arduino no disponible."
-    comando = comando.strip().lower()
-    ser.write((comando + '\n').encode())
-    time.sleep(0.1)
-    if ser.in_waiting > 0:
-        return ser.readline().decode(errors='ignore').strip()
-    return "Comando enviado."
+    if comando == "guardar":
+        if not guardar_datos:
+            guardar_datos = True
+            threading.Thread(target=guardar_datos_sensores, daemon=True).start()
+            return "Guardado de datos iniciado."
+        return "Ya se está guardando."
+    elif comando == "detener":
+        guardar_datos = False
+        return "Guardado detenido."
+    elif comando in ['servo1', 'temperatura', 'luz', 'dc', 'derecha', 'izquierda', 'stop']:
+        ser.write((comando + '\n').encode())
+        time.sleep(0.2)
+        if ser.in_waiting > 0:
+            return ser.readline().decode(errors='ignore').strip()
+        return "Comando enviado al Arduino."
+    else:
+        return "Comando no válido."
 
-# ─ GUARDAR DATOS (IMAGEN + CSV) ─
-def guardar_datos_server():
-    global saving_data, ultimo_frame
-    with open(CSV_FILE, 'a', newline='') as f:
+# ─────────────────────────────
+# Guardar datos de sensores + frames
+# ─────────────────────────────
+def guardar_datos_sensores():
+    global guardar_datos, frame_actual
+    csv_file = os.path.join(SAVE_DIR, "sensores.csv")
+    existe = os.path.isfile(csv_file)
+    with open(csv_file, mode='a', newline='') as f:
         writer = csv.writer(f)
-        if os.stat(CSV_FILE).st_size == 0:
-            writer.writerow(["Tiempo", "Frame", "Temperatura (°C)", "Luz (V)"])
-        while saving_data:
-            timestamp = time.strftime("%Y%m%d_%H%M%S")
-            # Guardar último frame
-            if ultimo_frame is not None:
-                img_path = os.path.join(SAVE_DIR, f"{timestamp}.png")
-                cv2.imwrite(img_path, ultimo_frame)
-            else:
-                img_path = ""
-            # Leer Arduino
-            temp = enviar_a_arduino("temperatura")
-            luz = enviar_a_arduino("luz")
-            writer.writerow([timestamp, img_path, temp, luz])
-            f.flush()
+        if not existe:
+            writer.writerow(["Tiempo", "Temperatura (°C)", "Luz (V)", "ArchivoImagen"])
+        while guardar_datos:
+            ser.write(b'temperatura\n')
+            time.sleep(0.1)
+            temp = ser.readline().decode(errors='ignore').strip()
+            ser.write(b'luz\n')
+            time.sleep(0.1)
+            luz = ser.readline().decode(errors='ignore').strip()
+            tiempo = time.strftime("%Y%m%d_%H%M%S")
+            img_name = os.path.join(SAVE_DIR, f"{tiempo}.png")
+            if frame_actual is not None:
+                cv2.imwrite(img_name, frame_actual)
+            if temp and luz:
+                writer.writerow([tiempo, temp, luz, img_name])
+                f.flush()
+                print(f"[GUARDADO] {tiempo} | {temp} | {luz} | {img_name}")
             time.sleep(0.5)
 
-# ─ HILO VIDEO TCP ─
-def video_tcp_thread(conn):
-    global camera_on, ultimo_frame
-    cap = cv2.VideoCapture(0)
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 320)
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 240)
-
-    while camera_on:
-        ret, frame = cap.read()
-        if not ret:
-            continue
-        ultimo_frame = frame.copy()
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        _, enc = cv2.imencode('.jpg', gray, [int(cv2.IMWRITE_JPEG_QUALITY), 70])
-        data = enc.tobytes()
-        try:
-            conn.sendall(struct.pack("Q", len(data)) + data)
-        except:
-            break
-        time.sleep(0.03)  # ~30 fps
-
-    cap.release()
-    conn.close()
-    print("[SERVER] Cliente TCP desconectado, video detenido en el cliente pero cámara sigue activa.")
-
-# ─ SERVIDOR UDP (COMANDOS) ─
+# ─────────────────────────────
+# Servidor UDP: comandos
+# ─────────────────────────────
 def servidor_udp():
-    global camera_on, sensor_on, dc_on, servo_on, saving_data
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.bind((SERVER_IP, UDP_PORT))
-    print(f"[SERVER] UDP escuchando en {SERVER_IP}:{UDP_PORT}")
-
+    print(f"[SERVIDOR] UDP escuchando en {SERVER_IP}:{UDP_PORT}")
     while True:
         msg, addr = sock.recvfrom(BUFFER_SIZE)
-        cmd = msg.decode().strip().lower()
-        print(f"[UDP] Comando recibido: {cmd}")
+        comando = msg.decode('utf-8').strip()
+        print(f"[UDP] Comando recibido: {comando}")
+        respuesta = enviar_a_arduino(comando)
+        sock.sendto(respuesta.encode('utf-8'), addr)
 
-        # ─ CONTROL CAMARA ─
-        if cmd == "start camera":
-            camera_on = True
-            threading.Thread(target=video_tcp_server, daemon=True).start()
-            sock.sendto(b"Camera ON", addr)
-        elif cmd == "stop camera":
-            camera_on = False
-            sock.sendto(b"Camera OFF (ultimo frame mostrado)", addr)
+# ─────────────────────────────
+# Servidor TCP: video
+# ─────────────────────────────
+def servidor_video():
+    global frame_actual
+    while True:  # Mantener el servidor abierto siempre
+        try:
+            srv_vid = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            srv_vid.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            srv_vid.bind((SERVER_IP, TCP_PORT))
+            srv_vid.listen(1)
+            print(f"[SERVIDOR] Video escuchando en {SERVER_IP}:{TCP_PORT}")
+            conn, addr = srv_vid.accept()
+            print(f"[SERVIDOR] Cliente de video conectado: {addr}")
+            cap = cv2.VideoCapture(0)
+            if not cap.isOpened():
+                print("[ERROR] No se pudo acceder a la cámara.")
+                conn.close()
+                continue
+            while True:
+                ret, frame = cap.read()
+                if not ret:
+                    continue
+                gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                frame_actual = gray.copy()  # Mantener el último frame
+                _, encimg = cv2.imencode('.jpg', gray, [int(cv2.IMWRITE_JPEG_QUALITY), 70])
+                data = encimg.tobytes()
+                try:
+                    conn.sendall(struct.pack("Q", len(data)) + data)
+                except:
+                    print("[SERVIDOR] Cliente de video desconectado.")
+                    break
+            cap.release()
+            conn.close()
+        except Exception as e:
+            print(f"[SERVIDOR] Error video TCP: {e}")
+            time.sleep(1)
 
-        # ─ CONTROL SENSORES ─
-        elif cmd == "start sensor":
-            sensor_on = True
-            threading.Thread(target=hilo_sensor, args=(sock, addr), daemon=True).start()
-            sock.sendto(b"Sensor ON", addr)
-        elif cmd == "stop sensor":
-            sensor_on = False
-            sock.sendto(b"Sensor OFF", addr)
-
-        # ─ MOTOR DC ─
-        elif cmd == "start dc":
-            dc_on = True
-            threading.Thread(target=hilo_dc, daemon=True).start()
-            sock.sendto(b"DC Motor ON", addr)
-        elif cmd == "stop dc":
-            dc_on = False
-            sock.sendto(b"DC Motor OFF", addr)
-
-        # ─ SERVOMOTOR ─
-        elif cmd == "start servo":
-            servo_on = True
-            threading.Thread(target=hilo_servo, daemon=True).start()
-            sock.sendto(b"Servo ON", addr)
-        elif cmd == "stop servo":
-            servo_on = False
-            sock.sendto(b"Servo OFF", addr)
-
-        # ─ GUARDADO DATOS ─
-        elif cmd == "guardar":
-            saving_data = True
-            threading.Thread(target=guardar_datos_server, daemon=True).start()
-            sock.sendto(b"Guardado ON", addr)
-        elif cmd == "detener":
-            saving_data = False
-            sock.sendto(b"Guardado OFF", addr)
-
-        else:
-            sock.sendto(b"Comando invalido", addr)
-
-# ─ HILOS DE ACTUADORES Y SENSORES ─
-def hilo_dc():
-    global dc_on
-    while dc_on:
-        enviar_a_arduino("dc")
-        time.sleep(0.5)
-
-def hilo_servo():
-    global servo_on
-    while servo_on:
-        enviar_a_arduino("servo1")
-        time.sleep(0.5)
-
-def hilo_sensor(sock, addr):
-    global sensor_on
-    while sensor_on:
-        temp = enviar_a_arduino("temperatura")
-        luz = enviar_a_arduino("luz")
-        mensaje = f"TEMP:{temp} °C | LUZ:{luz} V"
-        sock.sendto(mensaje.encode(), addr)
-        time.sleep(0.5)
-
-# ─ FUNCION TCP SERVIDOR ─
-def video_tcp_server():
-    srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR,1)
-    srv.bind((SERVER_IP, TCP_PORT))
-    srv.listen(1)
-    print(f"[SERVER] TCP Video escuchando en {SERVER_IP}:{TCP_PORT}")
-    try:
-        conn, addr = srv.accept()
-        print(f"[SERVER] Cliente TCP conectado: {addr}")
-        video_tcp_thread(conn)
-    except:
-        print("[SERVER] No se pudo conectar al cliente TCP.")
-    finally:
-        srv.close()
-
-# ─ MAIN ─
+# ─────────────────────────────
+# Main
+# ─────────────────────────────
 if __name__ == "__main__":
     threading.Thread(target=servidor_udp, daemon=True).start()
-    print("[SERVER] Servidor UDP iniciado, esperando comandos...")
-    while True:
-        time.sleep(1)
+    servidor_video()
