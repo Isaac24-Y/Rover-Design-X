@@ -13,6 +13,7 @@ import csv
 
 # ---------- CONFIG ----------
 SERVER_IP = "172.32.214.66"  # IP Raspberry Pi
+SERVER_IP = "192.168.1.10"  # IP Raspberry Pi
 UDP_PORT = 50000
 TCP_PORT = 50001
 BUFFER_SIZE = 4096
@@ -175,37 +176,71 @@ def toggle_pause():
 
 def capture_image_and_uv():
     """
-    Guarda la imagen actual (último frame) y guarda matrices U y V en CSV.
+    Captura el frame actual, guarda la imagen (color y gris),
+    y agrega los datos (fecha, dimensiones, intensidad, temperatura y luz)
+    en un único CSV acumulativo.
     """
     global last_frame_bgr
     if last_frame_bgr is None:
         messagebox.showwarning("Captura", "No hay frame disponible para capturar.")
         return
 
-    t = time.strftime("%Y%m%d-%H%M%S")
+    # Crear carpeta de capturas si no existe
     carpeta = "capturas"
     os.makedirs(carpeta, exist_ok=True)
 
-    # Guardar imagen JPG
-    img_path = os.path.join(carpeta, f"captura_{t}.jpg")
+    # Obtener timestamp actual
+    fecha_hora = time.strftime("%Y-%m-%d %H:%M:%S")
+    timestamp = time.strftime("%Y%m%d-%H%M%S")
+
+    # Guardar imagen color y gris
+    img_path = os.path.join(carpeta, f"captura_{timestamp}.jpg")
+    gray_path = os.path.join(carpeta, f"gray_{timestamp}.jpg")
+
     cv2.imwrite(img_path, last_frame_bgr)
-    # Convertir a YUV para obtener U y V
-    yuv = cv2.cvtColor(last_frame_bgr, cv2.COLOR_BGR2YUV)
-    Y, U, V = cv2.split(yuv)
+    gray = cv2.cvtColor(last_frame_bgr, cv2.COLOR_BGR2GRAY)
+    cv2.imwrite(gray_path, gray)
 
-    # Guardar U y V como CSV (guardamos como integers 0-255)
-    u_path = os.path.join(carpeta, f"U_{t}.csv")
-    v_path = os.path.join(carpeta, f"V_{t}.csv")
-    np.savetxt(u_path, U, delimiter=",", fmt='%d')
-    np.savetxt(v_path, V, delimiter=",', fmt='%d')  # <- CORRECCIÓN: comilla simple fue un typo
-    # NOTE: fixed fmt quoting below
+    # Obtener dimensiones e intensidad
+    pixelsV, pixelsU = gray.shape  # alto, ancho
+    lightIntensity = pixelsU * pixelsV
 
-    # To avoid the small typo above, rewrite properly:
-    np.savetxt(u_path, U, delimiter=",", fmt='%d')
-    np.savetxt(v_path, V, delimiter=",", fmt='%d')
+    # Obtener lecturas del servidor (temperatura y luz)
+    try:
+        temp_resp = enviar_comando("temperatura")
+        luz_resp = enviar_comando("luz")
 
-    messagebox.showinfo("Captura", f"Imagen guardada: {img_path}\nU: {u_path}\nV: {v_path}")
+        temp_val = ''.join(ch for ch in temp_resp if ch.isdigit() or ch in ".-")
+        luz_val = ''.join(ch for ch in luz_resp if ch.isdigit() or ch in ".-")
+    except Exception as e:
+        temp_val = "N/A"
+        luz_val = "N/A"
+        print(f"[ERROR] Lectura sensores en captura: {e}")
 
+    # Archivo CSV único
+    csv_path = os.path.join(carpeta, "datos_capturas.csv")
+
+    # Si no existe, escribir encabezado
+    write_header = not os.path.exists(csv_path)
+
+    with open(csv_path, mode="a", newline="") as file:
+        writer = csv.writer(file)
+        if write_header:
+            writer.writerow([
+                "fecha_hora", "pixelsU", "pixelsV",
+                "lightIntensity", "temperatura(°C)", "luz(V)"
+            ])
+        writer.writerow([fecha_hora, pixelsU, pixelsV, lightIntensity, temp_val, luz_val])
+
+    messagebox.showinfo(
+        "Captura completada",
+        f"Imagen guardada: {img_path}\n"
+        f"Escala de grises: {gray_path}\n"
+        f"CSV: {csv_path}\n\n"
+        f"Temperatura: {temp_val} °C\n"
+        f"Luz: {luz_val} V"
+    )
+    
 def cerrar_cliente():
     global running
     running = False
