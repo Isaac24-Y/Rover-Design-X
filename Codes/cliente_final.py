@@ -7,7 +7,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 from PIL import Image, ImageTk
 
-SERVER_IP = "192.168.1.42"  # Cambiar por la IP de la Raspberry Pi
+SERVER_IP = "172.32.214.66"  # Cambiar por la IP de la Raspberry Pi
 UDP_PORT = 50000
 TCP_PORT = 50001
 BUFFER_SIZE = 1024
