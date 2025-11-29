@@ -9,7 +9,7 @@ import sys
 from queue import Queue
 
 # ========== CONFIGURACIÓN ==========
-ARDUINO_PORT = '/dev/ttyACM0'
+ARDUINO_PORT = '/dev/ttyUSB0'
 BAUD_RATE = 9600
 SERVER_IP = '0.0.0.0'
 UDP_PORT = 50000
