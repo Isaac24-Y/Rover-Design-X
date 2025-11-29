@@ -12,8 +12,8 @@ import os
 import csv
 
 # ---------- CONFIG ----------
-SERVER_IP = "172.32.214.66"  # IP Raspberry Pi
-SERVER_IP = "192.168.1.10"  # IP Raspberry Pi
+SERVER_IP = "172.32.142.175"  # IP Raspberry Pi
+#SERVER_IP = "192.168.1.10"  # IP Raspberry Pi
 UDP_PORT = 50000
 TCP_PORT = 50001
 BUFFER_SIZE = 4096

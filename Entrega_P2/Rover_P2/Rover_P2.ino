@@ -48,7 +48,7 @@ void loop() {
       Serial.println(" V");
     }
     else if (comando == "dc:left") {
-      analogWrite(motor_A, 255);
+      analogWrite(motor_A,                                                                                                                                                                                                     );
       digitalWrite(motor_B, 0);
       Serial.println("Motor girando a la izquierda.");
     }
