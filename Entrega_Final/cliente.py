@@ -14,6 +14,7 @@ from datetime import datetime
 
 # ========== CONFIGURACIÓN ==========
 SERVER_IP = "192.168.1.10"  # IP de la Raspberry Pi
+
 UDP_PORT = 50000
 TCP_PORT_VIDEO1 = 50001  # Cámara frontal
 TCP_PORT_VIDEO2 = 50002  # Cámara superior
