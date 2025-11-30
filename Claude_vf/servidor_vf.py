@@ -1,4 +1,4 @@
-# server_mejorado.py - Servidor Raspberry Pi optimizado
+# servidor_corregido.py - Servidor Raspberry Pi con odometría
 import socket
 import threading
 import struct
@@ -10,24 +10,33 @@ import os
 import json
 from queue import Queue, Empty
 from datetime import datetime
+import glob
 
 # ==================== CONFIGURACIÓN ====================
-ARDUINO_PORT = '/dev/ttyACM0'
+def detectar_puerto_arduino():
+    posibles = glob.glob('/dev/ttyUSB*') + glob.glob('/dev/ttyACM*')
+    if posibles:
+        print(f"[INFO] Puertos detectados: {posibles}")
+        return posibles[0]
+    print("[ERROR] No se detectó ningún puerto Arduino")
+    return None
+
+ARDUINO_PORT = detectar_puerto_arduino() or '/dev/ttyUSB0'
 BAUD_RATE = 9600
 BUFFER_SIZE = 4096
 SERVER_IP = '0.0.0.0'
 UDP_PORT = 50000
-TCP_PORT_VIDEO = 50001
-TCP_PORT_STATUS = 50002
+TCP_PORT_VIDEO_FRONTAL = 50001
+TCP_PORT_VIDEO_SUPERIOR = 50002
+TCP_PORT_STATUS = 50003  # ✅ CORREGIDO - Puerto único
 
 # Configuración de cámaras
 CAMERA_FRONTAL = 0
-CAMERA_SUPERIOR = 2
+CAMERA_SUPERIOR = 1  # ✅ Cambia según tu sistema
 
 # ==================== VARIABLES GLOBALES ====================
 ser = None
 csv_lock = threading.Lock()
-guardar_datos = False
 estado_rover = {
     "temperatura": "N/A",
     "humedad": "N/A",
@@ -36,13 +45,12 @@ estado_rover = {
     "accel": {"x": 0, "y": 0, "z": 0},
     "gyro": {"x": 0, "y": 0, "z": 0},
     "marcadores_detectados": 0,
-    "modo": "manual",  # manual o autonomo
+    "modo": "manual",
     "brazo_activo": False,
     "ultimo_log": "Sistema iniciado"
 }
 estado_lock = threading.Lock()
 
-# Cola de comandos serial para evitar colisiones
 serial_queue = Queue()
 
 # ==================== INICIALIZAR ARDUINO ====================
@@ -68,13 +76,13 @@ def agregar_log(mensaje):
         estado_rover["ultimo_log"] = log_mensaje
     print(f"[LOG] {log_mensaje}")
 
-# ==================== COMUNICACIÓN SERIAL OPTIMIZADA ====================
+# ==================== COMUNICACIÓN SERIAL ====================
 def serial_worker():
     """Worker thread que procesa comandos seriales en orden"""
     while True:
         try:
             comando, callback = serial_queue.get(timeout=0.1)
-            if comando is None:  # señal de parada
+            if comando is None:
                 break
             
             respuesta = enviar_a_arduino_directo(comando)
@@ -114,32 +122,49 @@ def enviar_a_arduino_directo(comando, espera_respuesta=True, timeout=1.0):
     except Exception as e:
         return f"Error: {e}"
 
-# ==================== ACTUALIZACIÓN PERIÓDICA DE SENSORES ====================
+# ==================== ACTUALIZACIÓN DE SENSORES ====================
 def actualizar_sensores_thread():
-    """Thread que actualiza sensores cada 0.5 segundos"""
+    """Thread que actualiza sensores incluyendo MPU6050"""
     while True:
         try:
-            # Leer temperatura
+            # Temperatura
             temp = enviar_a_arduino_directo("temp", timeout=0.5)
             with estado_lock:
                 estado_rover["temperatura"] = temp
             
-            # Leer humedad
+            # Humedad
             humedad = enviar_a_arduino_directo("humedad", timeout=0.5)
             with estado_lock:
                 estado_rover["humedad"] = humedad
             
-            # Leer luz
+            # Luz
             luz = enviar_a_arduino_directo("luz", timeout=0.5)
             with estado_lock:
                 estado_rover["luz"] = luz
             
-            # Leer distancia
+            # Distancia
             dist = enviar_a_arduino_directo("dist", timeout=0.5)
             with estado_lock:
                 estado_rover["distancia"] = dist
             
-            time.sleep(0.5)
+            # MPU6050 - ¡IMPORTANTE PARA ODOMETRÍA!
+            mpu_data = enviar_a_arduino_directo("mpu", timeout=0.5)
+            try:
+                # Parse: "AX: 123 AY: 456 AZ: 789 GX: 12 GY: 34 GZ: 56"
+                partes = mpu_data.split()
+                if len(partes) >= 12:
+                    with estado_lock:
+                        estado_rover["accel"]["x"] = partes[1]
+                        estado_rover["accel"]["y"] = partes[3]
+                        estado_rover["accel"]["z"] = partes[5]
+                        estado_rover["gyro"]["x"] = partes[7]
+                        estado_rover["gyro"]["y"] = partes[9]
+                        estado_rover["gyro"]["z"] = partes[11]
+            except:
+                pass
+            
+            time.sleep(0.3)  # Actualización más frecuente para odometría
+            
         except Exception as e:
             print(f"[ERROR SENSORES] {e}")
             time.sleep(1)
@@ -223,7 +248,7 @@ def secuencia_autonoma(tipo_marcador):
     
     agregar_log("✓ Secuencia autónoma completada")
 
-# ==================== SERVIDOR UDP (COMANDOS) ====================
+# ==================== SERVIDOR UDP ====================
 def servidor_udp():
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.bind((SERVER_IP, UDP_PORT))
@@ -255,12 +280,12 @@ def procesar_comando(comando):
         return "Retrocediendo"
     
     elif comando == "izquierda":
-        enviar_a_arduino_async("izq 200")
+        enviar_a_arduino_async("izquierda 200")
         agregar_log("↺ Girando izquierda")
         return "Girando izquierda"
     
     elif comando == "derecha":
-        enviar_a_arduino_async("der 200")
+        enviar_a_arduino_async("derecha 200")
         agregar_log("↻ Girando derecha")
         return "Girando derecha"
     
@@ -273,7 +298,7 @@ def procesar_comando(comando):
     elif comando.startswith("servo1 "):
         try:
             angulo = int(comando.split()[1])
-            angulo = max(0, min(30, angulo))  # Limitar 0-30°
+            angulo = max(0, min(30, angulo))
             enviar_a_arduino_async(f"servo1 {angulo}")
             agregar_log(f"Servo1 (cámara frontal) → {angulo}°")
             return f"Servo1: {angulo}°"
@@ -293,7 +318,6 @@ def procesar_comando(comando):
     # ===== MARCADORES =====
     elif comando.startswith("marcador:"):
         try:
-            # Formato: marcador:tipo:pixelsU:pixelsV:clave
             partes = comando.split(":")
             tipo = partes[1]
             pixelsU = int(partes[2])
@@ -304,14 +328,12 @@ def procesar_comando(comando):
                 estado_rover["marcadores_detectados"] += 1
             
             if es_clave:
-                # Iniciar secuencia autónoma en thread separado
                 threading.Thread(
                     target=secuencia_autonoma, 
                     args=(tipo,), 
                     daemon=True
                 ).start()
                 
-                # Esperar un momento para que tome humedad
                 time.sleep(3)
                 timestamp = guardar_marcador(pixelsU, pixelsV, tipo, modo="autonomo")
             else:
@@ -322,41 +344,62 @@ def procesar_comando(comando):
         except Exception as e:
             return f"Error guardando marcador: {e}"
     
-    # ===== LECTURA INMEDIATA MPU =====
+    # ===== MPU INMEDIATO =====
     elif comando == "mpu":
-        mpu_data = enviar_a_arduino_directo("mpu", timeout=1.0)
-        try:
-            # Parse: "AX: 123 AY: 456 AZ: 789 GX: 12 GY: 34 GZ: 56"
-            partes = mpu_data.split()
-            with estado_lock:
-                estado_rover["accel"]["x"] = partes[1]
-                estado_rover["accel"]["y"] = partes[3]
-                estado_rover["accel"]["z"] = partes[5]
-                estado_rover["gyro"]["x"] = partes[7]
-                estado_rover["gyro"]["y"] = partes[9]
-                estado_rover["gyro"]["z"] = partes[11]
-        except:
-            pass
-        return mpu_data
+        return enviar_a_arduino_directo("mpu", timeout=1.0)
     
-    # ===== OBTENER ESTADO =====
+    # ===== ESTADO =====
     elif comando == "get_estado":
         with estado_lock:
             return json.dumps(estado_rover)
+    
+    # ===== TEST MOTORES =====
+    elif comando == "test_motores":
+        threading.Thread(target=test_motores_secuencia, daemon=True).start()
+        return "Iniciando test de motores"
     
     # ===== OTROS =====
     else:
         resp = enviar_a_arduino_directo(comando)
         return resp
 
+def test_motores_secuencia():
+    """Secuencia de prueba de motores"""
+    agregar_log("=== INICIANDO TEST DE MOTORES ===")
+    
+    agregar_log("Probando AVANZAR...")
+    enviar_a_arduino_directo("avanzar 150", espera_respuesta=False)
+    time.sleep(2)
+    enviar_a_arduino_directo("stop", espera_respuesta=False)
+    time.sleep(0.5)
+    
+    agregar_log("Probando RETROCEDER...")
+    enviar_a_arduino_directo("retroceder 150", espera_respuesta=False)
+    time.sleep(2)
+    enviar_a_arduino_directo("stop", espera_respuesta=False)
+    time.sleep(0.5)
+    
+    agregar_log("Probando IZQUIERDA...")
+    enviar_a_arduino_directo("izquierda 150", espera_respuesta=False)
+    time.sleep(2)
+    enviar_a_arduino_directo("stop", espera_respuesta=False)
+    time.sleep(0.5)
+    
+    agregar_log("Probando DERECHA...")
+    enviar_a_arduino_directo("derecha 150", espera_respuesta=False)
+    time.sleep(2)
+    enviar_a_arduino_directo("stop", espera_respuesta=False)
+    
+    agregar_log("=== TEST COMPLETADO ===")
+
 # ==================== SERVIDOR TCP VIDEO ====================
 def servidor_video_frontal():
     """Servidor de video para cámara frontal"""
     srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    srv.bind((SERVER_IP, TCP_PORT_VIDEO))
+    srv.bind((SERVER_IP, TCP_PORT_VIDEO_FRONTAL))
     srv.listen(1)
-    print(f"[SERVIDOR] Video frontal en puerto {TCP_PORT_VIDEO}")
+    print(f"[SERVIDOR] Video frontal en puerto {TCP_PORT_VIDEO_FRONTAL}")
     
     while True:
         conn, addr = srv.accept()
@@ -378,15 +421,13 @@ def servidor_video_frontal():
                 if not ret:
                     break
                 
-                # Comprimir imagen
                 _, buffer = cv2.imencode('.jpg', frame, [
                     int(cv2.IMWRITE_JPEG_QUALITY), 60
                 ])
                 data = buffer.tobytes()
                 
-                # Enviar tamaño + datos
                 conn.sendall(struct.pack("Q", len(data)) + data)
-                time.sleep(0.033)  # ~30 FPS
+                time.sleep(0.033)
                 
         except Exception as e:
             print(f"[VIDEO FRONTAL] Desconectado: {e}")
@@ -398,9 +439,9 @@ def servidor_video_superior():
     """Servidor de video para cámara superior"""
     srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    srv.bind((SERVER_IP, TCP_PORT_VIDEO + 1))
+    srv.bind((SERVER_IP, TCP_PORT_VIDEO_SUPERIOR))
     srv.listen(1)
-    print(f"[SERVIDOR] Video superior en puerto {TCP_PORT_VIDEO + 1}")
+    print(f"[SERVIDOR] Video superior en puerto {TCP_PORT_VIDEO_SUPERIOR}")
     
     while True:
         conn, addr = srv.accept()
@@ -454,10 +495,9 @@ def servidor_status():
                 with estado_lock:
                     estado_json = json.dumps(estado_rover)
                 
-                # Enviar tamaño + JSON
                 data = estado_json.encode('utf-8')
                 conn.sendall(struct.pack("I", len(data)) + data)
-                time.sleep(0.5)
+                time.sleep(0.3)  # Actualización más frecuente
                 
         except Exception as e:
             print(f"[STATUS] Desconectado: {e}")
@@ -467,7 +507,7 @@ def servidor_status():
 # ==================== MAIN ====================
 if __name__ == "__main__":
     print("=" * 60)
-    print("   🤖 SERVIDOR ROVER DE EXPLORACIÓN")
+    print("   🤖 SERVIDOR ROVER CON ODOMETRÍA")
     print("=" * 60)
     
     # Conectar Arduino
@@ -481,26 +521,17 @@ if __name__ == "__main__":
     # Iniciar threads
     print("\n[INICIO] Iniciando threads...")
     
-    # Serial worker
     threading.Thread(target=serial_worker, daemon=True).start()
-    
-    # Actualización de sensores
     threading.Thread(target=actualizar_sensores_thread, daemon=True).start()
-    
-    # Servidor UDP (comandos)
     threading.Thread(target=servidor_udp, daemon=True).start()
-    
-    # Servidor TCP (status)
     threading.Thread(target=servidor_status, daemon=True).start()
-    
-    # Servidor video superior
     threading.Thread(target=servidor_video_superior, daemon=True).start()
     
     print("[LISTO] ✓ Todos los servicios iniciados")
-    print("\n🎥 Cámara frontal: puerto", TCP_PORT_VIDEO)
-    print("🎥 Cámara superior: puerto", TCP_PORT_VIDEO + 1)
-    print("📡 Comandos UDP: puerto", UDP_PORT)
-    print("📊 Status TCP: puerto", TCP_PORT_STATUS)
+    print(f"\n🎥 Cámara frontal: puerto {TCP_PORT_VIDEO_FRONTAL}")
+    print(f"🎥 Cámara superior: puerto {TCP_PORT_VIDEO_SUPERIOR}")
+    print(f"📡 Comandos UDP: puerto {UDP_PORT}")
+    print(f"📊 Status TCP: puerto {TCP_PORT_STATUS}")
     print("\n[SERVIDOR] Presiona Ctrl+C para detener\n")
     
     # Video frontal en thread principal
