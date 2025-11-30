@@ -9,7 +9,16 @@ import sys
 from queue import Queue
 
 # ========== CONFIGURACIÓN ==========
-ARDUINO_PORT = '/dev/ttyUSB0'
+import glob
+
+def detectar_puerto_arduino():
+    posibles = glob.glob('/dev/ttyUSB*') + glob.glob('/dev/ttyACM*')
+    if posibles:
+        return posibles[0]
+    return None
+
+ARDUINO_PORT = detectar_puerto_arduino() or '/dev/ttyUSB0'
+
 BAUD_RATE = 9600
 SERVER_IP = '0.0.0.0'
 UDP_PORT = 50000
