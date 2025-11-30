@@ -1,224 +1,362 @@
-# =========================
-# CONFIGURACIÓN ROVER DE EXPLORACIÓN
-# =========================
+# ========================================
+# config.yaml - Configuración del Sistema
+# ========================================
 
-# ========== SERVIDOR RASPBERRY PI ==========
-server:
-  ip: '0.0.0.0'
+# Configuración de red
+network:
+  raspberry_ip: "172.32.200.137"
   udp_port: 50000
   tcp_port: 50001
   buffer_size: 4096
+  timeout: 3.0
 
-# ========== ARDUINO ==========
-arduino:
-  port: '/dev/ttyUSB0'  # En Windows sería 'COM3', 'COM4', etc.
+# Configuración serial
+serial:
+  port: "/dev/ttyUSB0"  # Linux: /dev/ttyUSB0 o /dev/ttyACM0
   baud_rate: 115200
   timeout: 1.0
   retries: 3
 
-# ========== CÁMARAS ==========
+# Configuración de cámaras
 cameras:
   front:
-    device: 0  # /dev/video0
+    device: 0
     width: 640
     height: 480
     fps: 30
-  
   top:
-    device: 2  # /dev/video2
+    device: 2
     width: 640
     height: 480
     fps: 30
-  
+
+# Configuración de video streaming
+video:
   jpeg_quality: 70
+  frame_delay: 0.03  # ~30 FPS
 
-# ========== ARCHIVOS DE DATOS ==========
-data:
-  base_path: './data'
-  csv_markers: 'data/marcadores.csv'
-  csv_logs: 'data/logs.csv'
-  csv_telemetry: 'data/telemetria.csv'
-  log_file: 'data/rover.log'
-
-# ========== DETECCIÓN DE MARCADORES ==========
-marker_detection:
-  # Marcador clave (puede ser: Cruz, T, Círculo, Cuadrado, Triángulo)
-  key_marker: 'Círculo'
-  
-  # Umbral de confianza (0.0 a 1.0)
+# Configuración de detección de marcadores
+markers:
+  key_marker: "Círculo"  # Cruz, T, Círculo, Cuadrado, Triángulo
   confidence_threshold: 0.75
-  
-  # Rangos Hu Moments para cada figura
-  hu_ranges:
-    X:
-      1: [0.68, 0.75]
-      2: [2.7, 5.1]
-      3: [0, 6.5]
-      4: [5, 7.5]
-      5: [-14, 15]
-      6: [-12, 11]
-      7: [-13.5, 13]
-    
-    T:
-      1: [0.3, 0.7]
-      2: [0.5, 4]
-      3: [1, 2]
-      4: [1, 4]
-      5: [-10, 7]
-      6: [-5, 6]
-      7: [-8, 7]
-    
-    Circulo:
-      1: [0.72, 0.81]
-      2: [3.35, 5.1]
-      3: [4.5, 6.5]
-      4: [5.2, 8.4]
-      5: [-17, 18]
-      6: [-14, 13]
-      7: [-17, 17.5]
-    
-    Triangulo:
-      1: [0.6, 1]
-      2: [2, 4]
-      3: [2, 4]
-      4: [3.5, 6]
-      5: [6.5, 10]
-      6: [4.8, 10]
-      7: [-10, 10]
-    
-    Cuadrado:
-      1: [0.70, 0.89]
-      2: [2, 6.5]
-      3: [3, 7]
-      4: [4, 7.9]
-      5: [-15, 15]
-      6: [-11, 11]
-      7: [-15.7, 14]
-  
-  # Colores HSV para detección
-  colors:
-    orange:
-      lower: [8, 150, 180]
-      upper: [18, 255, 255]
-    
-    green:
-      lower: [35, 120, 150]
-      upper: [85, 255, 255]
-    
-    yellow:
-      lower: [22, 140, 150]
-      upper: [32, 255, 255]
+  template_size: 50
 
-# ========== CONTROL ==========
-control:
-  default_speed: 80
-  speed_min: 0
-  speed_max: 100
-  
-  # Límites de seguridad
-  max_motor_pwm: 255
-  
-  # Timeouts
-  command_timeout: 2.0
-  sensor_read_interval: 0.5
+# Configuración de archivos CSV
+csv:
+  output_dir: "data"
+  markers_file: "marcadores.csv"
+  logs_file: "logs.csv"
+  telemetry_file: "telemetria.csv"
 
-# ========== CALIBRACIÓN DE SENSORES ==========
-calibration:
+# Configuración de sensores (calibración)
+sensors:
   ldr:
-    # Mapeo de voltaje a lux (ajustar según calibración)
-    v_min: 0.0
-    v_max: 5.0
-    lux_min: 0
-    lux_max: 1000
+    voltage_divider_r1: 10000  # 10kΩ
+    voltage_divider_r2: 10000  # 10kΩ
   
-  humidity_capacitive:
-    # Valores típicos del EK1940
-    dry_value: 550
-    wet_value: 280
-  
-  mpu6050:
-    # Offsets de acelerómetro (ajustar tras calibración)
-    accel_offset_x: 0.0
-    accel_offset_y: 0.0
-    accel_offset_z: 0.0
-    
-    # Offsets de giroscopio
-    gyro_offset_x: 0.0
-    gyro_offset_y: 0.0
-    gyro_offset_z: 0.0
+  dht11:
+    pin: A1
+    type: "DHT11"
   
   vl53l0x:
-    # Timing budget en ms (mayor = más precisión pero más lento)
-    timing_budget: 33
-    
-    # Límite de distancia en mm
-    max_range: 2000
-
-# ========== MODOS DE OPERACIÓN ==========
-modes:
-  manual:
-    auto_save: false
-    telemetry_rate: 1.0  # segundos
+    i2c_address: 0x29
+    timing_budget: 33  # ms
   
-  autonomous:
-    auto_save: true
-    telemetry_rate: 0.5
-    marker_scan_rate: 0.1  # segundos entre escaneos
-    auto_sample_on_key_marker: true
+  mpu6050:
+    i2c_address: 0x68
+    accel_range: 2  # ±2g
+    gyro_range: 250  # ±250°/s
+  
+  ek1940:
+    pin: A2
+    calibration_dry: 550
+    calibration_wet: 280
 
-# ========== SECUENCIA DEL BRAZO ==========
-arm_sequence:
-  # Posiciones de servos para toma de muestra
-  steps:
-    - servo: 2
-      angle: 45
-      delay: 1000  # ms
-    
-    - servo: 3
-      angle: 135
-      delay: 1000
-    
-    - servo: 4
-      angle: 90
-      delay: 500
-    
-    - wait: 1000  # Estabilización
-    
-    - servo: 4
-      angle: 45
-      delay: 500
-    
-    - servo: 3
-      angle: 90
-      delay: 1000
-    
-    - servo: 2
-      angle: 90
-      delay: 1000
+# Configuración de motores
+motors:
+  max_speed: 100
+  min_speed: 0
+  acceleration_step: 10
+  pwm_frequency: 1000  # Hz
 
-# ========== LOGGING ==========
+# Configuración de servos
+servos:
+  servo1:  # Cámara frontal
+    pin: 6
+    min_angle: 0
+    max_angle: 30
+    default_angle: 15
+  
+  servo2:  # Brazo - hombro
+    pin: 7
+    min_angle: 0
+    max_angle: 180
+    default_angle: 90
+  
+  servo3:  # Brazo - codo
+    pin: 8
+    min_angle: 0
+    max_angle: 180
+    default_angle: 90
+  
+  servo4:  # Sensor humedad
+    pin: 9
+    min_angle: 0
+    max_angle: 90
+    default_angle: 45
+
+# Configuración de seguridad
+safety:
+  emergency_stop_enabled: true
+  watchdog_timeout: 5000  # ms
+  max_no_communication: 10  # segundos
+
+# Configuración de logging
 logging:
-  level: 'INFO'  # DEBUG, INFO, WARNING, ERROR, CRITICAL
-  console: true
-  file: true
-  csv: true
+  level: "INFO"  # DEBUG, INFO, WARNING, ERROR, CRITICAL
+  console_output: true
+  file_output: true
+  max_log_size: 10485760  # 10 MB
+  backup_count: 5
 
-# ========== INTERFAZ CLIENTE ==========
-client:
-  server_ip: '192.168.1.100'  # IP de la Raspberry Pi
-  reconnect_attempts: 5
-  reconnect_delay: 3  # segundos
-  
-  ui:
-    window_width: 1400
-    window_height: 900
-    theme: 'dark'  # dark o light
-    
-    camera_display:
-      width: 480
-      height: 360
-    
-    map:
-      scale: 2  # pixels por cm
-      max_points: 50
-      grid_size: 40
+---
+
+# ========================================
+# requirements.txt - Dependencias Python
+# ========================================
+
+# Para Raspberry Pi (servidor)
+opencv-python==4.8.1.78
+numpy==1.24.3
+pyserial==3.5
+PyYAML==6.0.1
+
+# Para Cliente
+opencv-python==4.8.1.78
+numpy==1.24.3
+Pillow==10.0.0
+
+# Librerías opcionales
+# scipy==1.11.2  # Para procesamiento de señales
+# matplotlib==3.7.2  # Para gráficas
+
+---
+
+# ========================================
+# README.md - Documentación Principal
+# ========================================
+
+# 🚀 Sistema de Rover de Exploración v2.0
+
+Sistema completo para control de rover de exploración con capacidades manuales y autónomas.
+
+## 📋 Características
+
+- ✅ Control manual por GUI o teclado (WASD/flechas)
+- ✅ Modo autónomo con detección de marcadores
+- ✅ Streaming de video dual (cámara frontal y superior)
+- ✅ Telemetría en tiempo real
+- ✅ Sistema de guardado CSV
+- ✅ Mapa 2D generado en tiempo real
+- ✅ Control de 4 servos independientes
+- ✅ Parada de emergencia
+- ✅ Logging completo de eventos
+
+## 🔧 Hardware Requerido
+
+### Arduino Nano
+- 1x Arduino Nano
+- 2x Puentes H (L298N o similar)
+- 4x Servos (SG90 o equivalente)
+- 1x Sensor DHT11
+- 1x Fotorresistor (LDR) + resistencia 10kΩ
+- 1x Sensor VL53L0X
+- 1x IMU MPU6050
+- 1x Sensor capacitivo EK1940
+- Cables, fuente de alimentación, etc.
+
+### Raspberry Pi
+- 1x Raspberry Pi 3/4
+- 2x Cámaras USB o CSI
+- Tarjeta SD (16GB mínimo)
+- Adaptador WiFi (si es necesario)
+
+## 📦 Instalación
+
+### 1. Arduino Nano
+
+```bash
+# Instalar Arduino IDE
+# Abrir archivo: arduino_firmware.ino
+# Instalar librerías requeridas:
+# - Servo (incluida)
+# - Wire (incluida)
+# - Adafruit_VL53L0X
+# - DHT sensor library
+
+# Conectar Arduino y subir el firmware
+```
+
+### 2. Raspberry Pi
+
+```bash
+# Actualizar sistema
+sudo apt update && sudo apt upgrade -y
+
+# Instalar dependencias
+sudo apt install python3-pip python3-opencv -y
+
+# Clonar/copiar archivos del proyecto
+cd ~
+mkdir rover_system
+cd rover_system
+
+# Instalar dependencias Python
+pip3 install -r requirements.txt
+
+# Dar permisos al puerto serial
+sudo usermod -a -G dialout $USER
+# Reiniciar sesión después de esto
+
+# Configurar inicio automático (opcional)
+sudo nano /etc/rc.local
+# Agregar antes de "exit 0":
+# python3 /home/pi/rover_system/server.py &
+```
+
+### 3. Cliente (Computadora de control)
+
+```bash
+# Instalar Python 3.8+
+# https://www.python.org/downloads/
+
+# Instalar dependencias
+pip install -r requirements.txt
+
+# Editar config.yaml con la IP correcta de la Raspberry Pi
+
+# Ejecutar cliente
+python client_gui.py
+```
+
+## 🚀 Uso
+
+### Iniciar Sistema
+
+1. **Arduino:** Conectar y verificar que esté encendido
+2. **Raspberry Pi:** 
+   ```bash
+   cd ~/rover_system
+   python3 server.py
+   ```
+3. **Cliente:** 
+   ```bash
+   python client_gui.py
+   ```
+
+### Controles
+
+#### Teclado
+- `W` / `↑` : Avanzar
+- `S` / `↓` : Retroceder
+- `A` / `←` : Girar izquierda
+- `D` / `→` : Girar derecha
+
+#### Botones
+- **Modo Manual:** Control directo por usuario
+- **Modo Automático:** Detección y respuesta a marcadores
+- **EMERGENCIA STOP:** Detiene todos los motores inmediatamente
+
+## 📊 Estructura de Archivos
+
+```
+rover_system/
+├── arduino_firmware.ino      # Firmware para Arduino
+├── server.py                  # Servidor Raspberry Pi
+├── client_gui.py             # Cliente GUI
+├── config.yaml               # Configuración
+├── requirements.txt          # Dependencias Python
+├── data/                     # Datos generados
+│   ├── marcadores.csv
+│   ├── logs.csv
+│   └── telemetria.csv
+├── docs/                     # Documentación
+│   ├── architecture.md
+│   ├── protocol.md
+│   └── troubleshooting.md
+└── tests/                    # Scripts de prueba
+    ├── test_serial.py
+    ├── test_video.py
+    └── simulator.py
+```
+
+## 🔍 Troubleshooting
+
+### Arduino no responde
+```bash
+# Verificar puerto
+ls /dev/ttyUSB* /dev/ttyACM*
+
+# Probar comunicación
+python3 tests/test_serial.py
+```
+
+### Video no se muestra
+```bash
+# Verificar cámaras
+ls /dev/video*
+v4l2-ctl --list-devices
+
+# Probar streaming
+python3 tests/test_video.py
+```
+
+### Sin conexión UDP
+```bash
+# Verificar red
+ping 192.168.1.100
+
+# Verificar puertos
+netstat -an | grep 50000
+```
+
+## 📝 Formato CSV
+
+### marcadores.csv
+```csv
+timestamp,mode,px_u,px_v,marker_type,light_V,temp_C,humidity_percent,action,notes
+2025-11-29 14:00:05,MANUAL,320,240,Cruz,1.23,25.3,0,PHOTO,detectado manualmente
+```
+
+### logs.csv
+```csv
+timestamp,component,level,message
+2025-11-29 14:00:05,ROVER,INFO,tomé fotografía
+```
+
+### telemetria.csv
+```csv
+timestamp,temp_C,light_V,distance_cm,humidity_ambient,imu_ax,imu_ay,imu_az,imu_gx,imu_gy,imu_gz
+2025-11-29 14:00:05,25.3,1.23,120,35.2,0.02,-0.01,9.81,0.1,-0.05,0.02
+```
+
+## 🔐 Seguridad
+
+- **Parada de emergencia** tiene máxima prioridad
+- **Watchdog** evita bloqueos del sistema
+- **Límites de velocidad** configurables
+- **Timeouts** en todas las comunicaciones
+
+## 🤝 Contribución
+
+Para reportar problemas o sugerir mejoras, contactar al equipo de desarrollo.
+
+## 📄 Licencia
+
+Sistema desarrollado para fines educativos.
+
+## 📧 Contacto
+
+Equipo de Rover de Exploración
+Version: 2.0
+Fecha: 2025-11-29
