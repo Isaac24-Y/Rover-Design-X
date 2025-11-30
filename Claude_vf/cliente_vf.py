@@ -1,4 +1,4 @@
-# cliente_con_odometria.py - Cliente con mapa de odometría
+# cliente_completo.py - Cliente con todas las funciones requeridas
 import socket
 import struct
 import cv2
@@ -16,11 +16,11 @@ from matplotlib.figure import Figure
 import math
 
 # ==================== CONFIGURACIÓN ====================
-SERVER_IP = "192.168.1.8"  # IP de Raspberry Pi
+SERVER_IP = "192.168.1.8"  # ⚠️ CAMBIAR A TU IP
 UDP_PORT = 50000
 TCP_PORT_VIDEO_FRONTAL = 50001
 TCP_PORT_VIDEO_SUPERIOR = 50002
-TCP_PORT_STATUS = 50003  # ✅ CORREGIDO
+TCP_PORT_STATUS = 50003
 BUFFER_SIZE = 4096
 
 # ==================== DETECCIÓN DE MARCADORES ====================
@@ -47,7 +47,6 @@ RANGOS_HU = {
     }
 }
 
-# Rangos HSV para colores fosforescentes
 LOWER_ORANGE = np.array([8, 150, 180])
 UPPER_ORANGE = np.array([18, 255, 255])
 LOWER_GREEN = np.array([35, 120, 150])
@@ -65,31 +64,25 @@ estado_lock = threading.Lock()
 # Odometría
 class Odometria:
     def __init__(self):
-        self.x = 0.0  # metros
-        self.y = 0.0  # metros
-        self.theta = 0.0  # radianes
+        self.x = 0.0
+        self.y = 0.0
+        self.theta = 0.0
         self.historial_x = deque(maxlen=200)
         self.historial_y = deque(maxlen=200)
-        self.historial_theta = deque(maxlen=50)
-        self.distancias = deque(maxlen=100)  # Historial de distancias
+        self.distancias = deque(maxlen=100)
         self.ultimo_tiempo = time.time()
-        self.velocidad = 0.0  # m/s estimada
         self.lock = threading.Lock()
         
     def actualizar_desde_mpu(self, gyro_z, dt):
-        """Actualiza orientación desde giroscopio"""
         with self.lock:
-            # Convertir de unidades MPU a radianes/s (aproximado)
-            gyro_z_rad = gyro_z * (math.pi / 180.0) / 131.0  # Escala MPU6050
+            gyro_z_rad = gyro_z * (math.pi / 180.0) / 131.0
             self.theta += gyro_z_rad * dt
-            self.theta = (self.theta + math.pi) % (2 * math.pi) - math.pi  # Normalizar
-            self.historial_theta.append(self.theta)
+            self.theta = (self.theta + math.pi) % (2 * math.pi) - math.pi
     
     def actualizar_posicion(self, comando, dt):
-        """Actualiza posición basándose en comandos"""
         with self.lock:
             if comando == "avanzar":
-                velocidad_estimada = 0.3  # m/s aproximado
+                velocidad_estimada = 0.3
                 dx = velocidad_estimada * dt * math.cos(self.theta)
                 dy = velocidad_estimada * dt * math.sin(self.theta)
                 self.x += dx
@@ -105,13 +98,11 @@ class Odometria:
             self.historial_y.append(self.y)
     
     def agregar_distancia(self, distancia):
-        """Agrega medición de distancia"""
-        if distancia > 0 and distancia < 2000:  # Entre 0 y 2 metros
+        if distancia > 0 and distancia < 2000:
             with self.lock:
                 self.distancias.append((self.x, self.y, self.theta, distancia / 1000.0))
     
     def obtener_estado(self):
-        """Retorna estado actual"""
         with self.lock:
             return {
                 'x': self.x,
@@ -123,14 +114,12 @@ class Odometria:
             }
     
     def reset(self):
-        """Reinicia odometría"""
         with self.lock:
             self.x = 0.0
             self.y = 0.0
             self.theta = 0.0
             self.historial_x.clear()
             self.historial_y.clear()
-            self.historial_theta.clear()
             self.distancias.clear()
 
 odometria = Odometria()
@@ -142,7 +131,6 @@ def coincide_rango(valor, rango):
     return rango[0] <= valor <= rango[1]
 
 def clasificar_marcador(hu_log):
-    """Clasifica figura usando Hu Moments"""
     for figura, reglas in RANGOS_HU.items():
         ok = True
         for idx, rango in reglas.items():
@@ -154,7 +142,6 @@ def clasificar_marcador(hu_log):
     return None
 
 def detectar_marcador(frame):
-    """Detecta marcador en frame y retorna tipo, coordenadas y frame anotado"""
     hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
     
     mask_orange = cv2.inRange(hsv, LOWER_ORANGE, UPPER_ORANGE)
@@ -202,16 +189,14 @@ def detectar_marcador(frame):
 
 # ==================== COMUNICACIÓN UDP ====================
 def enviar_comando(comando, espera_respuesta=True):
-    """Envía comando por UDP al servidor"""
     global ultimo_comando
     try:
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         sock.settimeout(2)
         sock.sendto(comando.encode('utf-8'), (SERVER_IP, UDP_PORT))
         
-        # Actualizar comando actual para odometría
         if comando in ["avanzar", "retroceder", "izquierda", "derecha", "stop"]:
-            ultimo_comando = comando
+            ultimo_comando = comando.split()[0]
         
         if espera_respuesta:
             data, _ = sock.recvfrom(BUFFER_SIZE)
@@ -226,7 +211,6 @@ def enviar_comando(comando, espera_respuesta=True):
 
 # ==================== RECEPCIÓN DE VIDEO ====================
 def recibir_video_frontal():
-    """Recibe video de cámara frontal"""
     global frame_frontal, running
     
     max_intentos = 3
@@ -242,6 +226,7 @@ def recibir_video_frontal():
             if intento < max_intentos - 1:
                 time.sleep(2)
             else:
+                print("[WARN] Continuando sin video frontal")
                 return
     
     data = b""
@@ -281,7 +266,6 @@ def recibir_video_frontal():
     sock.close()
 
 def recibir_video_superior():
-    """Recibe video de cámara superior"""
     global frame_superior, running
     
     max_intentos = 3
@@ -297,6 +281,7 @@ def recibir_video_superior():
             if intento < max_intentos - 1:
                 time.sleep(2)
             else:
+                print("[WARN] Continuando sin video superior")
                 return
     
     data = b""
@@ -337,7 +322,6 @@ def recibir_video_superior():
 
 # ==================== RECEPCIÓN DE ESTADO ====================
 def recibir_estado():
-    """Recibe estado del rover periódicamente"""
     global estado_rover, running
     
     max_intentos = 3
@@ -390,7 +374,6 @@ def recibir_estado():
 
 # ==================== ACTUALIZACIÓN ODOMETRÍA ====================
 def actualizar_odometria_thread():
-    """Thread que actualiza odometría continuamente"""
     global ultimo_comando
     ultimo_tiempo = time.time()
     
@@ -400,7 +383,6 @@ def actualizar_odometria_thread():
             dt = tiempo_actual - ultimo_tiempo
             ultimo_tiempo = tiempo_actual
             
-            # Obtener datos MPU si están disponibles
             with estado_lock:
                 if 'gyro' in estado_rover and 'z' in estado_rover['gyro']:
                     try:
@@ -409,7 +391,6 @@ def actualizar_odometria_thread():
                     except:
                         pass
                 
-                # Agregar medición de distancia
                 if 'distancia' in estado_rover:
                     try:
                         dist_str = estado_rover['distancia']
@@ -419,11 +400,10 @@ def actualizar_odometria_thread():
                     except:
                         pass
             
-            # Actualizar posición según comando actual
             if ultimo_comando in ["avanzar", "retroceder"]:
                 odometria.actualizar_posicion(ultimo_comando, dt)
             
-            time.sleep(0.05)  # 20 Hz
+            time.sleep(0.05)
             
         except Exception as e:
             print(f"[ERROR] Odometría: {e}")
@@ -435,11 +415,12 @@ class RoverClienteUI:
         global marcador_clave
         
         self.root = root
-        self.root.title("🤖 Control de Rover - Exploración con Odometría")
+        self.root.title("🤖 Control de Rover - Sistema Completo")
         self.root.geometry("1600x900")
         self.root.configure(bg="#1e1e1e")
         
         marcador_clave = tk.StringVar(value="Circulo")
+        self.velocidad_actual = 200
         
         self.root.bind('<KeyPress>', self.tecla_presionada)
         self.root.bind('<KeyRelease>', self.tecla_liberada)
@@ -450,7 +431,6 @@ class RoverClienteUI:
         self.actualizar_gui()
         
     def crear_interfaz(self):
-        # ===== FRAME PRINCIPAL =====
         main_container = tk.Frame(self.root, bg="#1e1e1e")
         main_container.pack(fill="both", expand=True, padx=10, pady=10)
         
@@ -458,7 +438,6 @@ class RoverClienteUI:
         left_frame = tk.Frame(main_container, bg="#1e1e1e")
         left_frame.pack(side="left", fill="both", expand=True)
         
-        # Video Frontal
         frontal_label = tk.Label(left_frame, text="📹 CÁMARA FRONTAL", 
                                  bg="#2d2d2d", fg="white", font=("Arial", 12, "bold"))
         frontal_label.pack(pady=(0, 5))
@@ -466,7 +445,6 @@ class RoverClienteUI:
         self.video_frontal = tk.Label(left_frame, bg="black", width=640, height=360)
         self.video_frontal.pack()
         
-        # Video Superior
         superior_label = tk.Label(left_frame, text="📹 CÁMARA SUPERIOR", 
                                   bg="#2d2d2d", fg="white", font=("Arial", 12, "bold"))
         superior_label.pack(pady=(10, 5))
@@ -482,7 +460,6 @@ class RoverClienteUI:
                             bg="#2d2d2d", fg="#00ff00", font=("Arial", 14, "bold"))
         map_label.pack(pady=10)
         
-        # Crear figura de matplotlib
         self.fig = Figure(figsize=(5, 5), facecolor='#1e1e1e')
         self.ax = self.fig.add_subplot(111, facecolor='#2d2d2d')
         self.ax.set_xlabel('X (metros)', color='white')
@@ -490,11 +467,9 @@ class RoverClienteUI:
         self.ax.tick_params(colors='white')
         self.ax.grid(True, alpha=0.3)
         
-        # Integrar en tkinter
         self.canvas_mapa = FigureCanvasTkAgg(self.fig, center_frame)
         self.canvas_mapa.get_tk_widget().pack(fill="both", expand=True, padx=10, pady=10)
         
-        # Información de odometría
         odom_info_frame = tk.Frame(center_frame, bg="#3d3d3d")
         odom_info_frame.pack(fill="x", padx=10, pady=5)
         
@@ -504,7 +479,6 @@ class RoverClienteUI:
                                    font=("Arial", 10, "bold"))
         self.odom_label.pack(pady=5)
         
-        # Botón reset odometría
         tk.Button(center_frame, text="🔄 Reset Odometría", 
                  command=self.reset_odometria,
                  bg="#ff9800", fg="white", font=("Arial", 10, "bold")).pack(pady=5)
@@ -514,7 +488,7 @@ class RoverClienteUI:
         right_frame.pack(side="right", fill="y", padx=(10, 0))
         right_frame.pack_propagate(False)
         
-        title = tk.Label(right_frame, text="🎮 PANEL DE CONTROL", 
+        title = tk.Label(right_frame, text="🎮 CONTROL", 
                         bg="#2d2d2d", fg="#00ff00", font=("Arial", 16, "bold"))
         title.pack(pady=10)
         
@@ -524,19 +498,19 @@ class RoverClienteUI:
         sensores_frame.pack(fill="x", padx=10, pady=5)
         
         self.temp_label = tk.Label(sensores_frame, text="🌡️ Temp: -- °C", 
-                                   bg="#3d3d3d", fg="#ff6b6b", font=("Arial", 10, "bold"))
+                                   bg="#3d3d3d", fg="#ff6b6b", font=("Arial", 9, "bold"))
         self.temp_label.pack(anchor="w", padx=10, pady=2)
         
         self.luz_label = tk.Label(sensores_frame, text="💡 Luz: -- V", 
-                                  bg="#3d3d3d", fg="#ffd93d", font=("Arial", 10, "bold"))
+                                  bg="#3d3d3d", fg="#ffd93d", font=("Arial", 9, "bold"))
         self.luz_label.pack(anchor="w", padx=10, pady=2)
         
         self.humedad_label = tk.Label(sensores_frame, text="💧 Humedad: -- %", 
-                                      bg="#3d3d3d", fg="#6bcfff", font=("Arial", 10, "bold"))
+                                      bg="#3d3d3d", fg="#6bcfff", font=("Arial", 9, "bold"))
         self.humedad_label.pack(anchor="w", padx=10, pady=2)
         
         self.dist_label = tk.Label(sensores_frame, text="📏 Distancia: -- mm", 
-                                   bg="#3d3d3d", fg="#95e1d3", font=("Arial", 10, "bold"))
+                                   bg="#3d3d3d", fg="#95e1d3", font=("Arial", 9, "bold"))
         self.dist_label.pack(anchor="w", padx=10, pady=2)
         
         # ===== ESTADO =====
@@ -545,94 +519,132 @@ class RoverClienteUI:
         estado_frame.pack(fill="x", padx=10, pady=5)
         
         self.modo_label = tk.Label(estado_frame, text="Modo: MANUAL", 
-                                   bg="#3d3d3d", fg="#00ff00", font=("Arial", 10, "bold"))
+                                   bg="#3d3d3d", fg="#00ff00", font=("Arial", 9, "bold"))
         self.modo_label.pack(anchor="w", padx=10, pady=2)
         
         self.marcadores_label = tk.Label(estado_frame, text="🎯 Marcadores: 0", 
-                                         bg="#3d3d3d", fg="#ff9ff3", font=("Arial", 10, "bold"))
+                                         bg="#3d3d3d", fg="#ff9ff3", font=("Arial", 9, "bold"))
         self.marcadores_label.pack(anchor="w", padx=10, pady=2)
         
         self.log_label = tk.Label(estado_frame, text="Esperando...", 
-                                  bg="#3d3d3d", fg="#c7ecee", font=("Arial", 9), 
+                                  bg="#3d3d3d", fg="#c7ecee", font=("Arial", 8), 
                                   wraplength=300, justify="left")
         self.log_label.pack(anchor="w", padx=10, pady=5)
+        
+        # ===== CONTROL DE VELOCIDAD =====
+        vel_frame = tk.LabelFrame(right_frame, text="⚡ Velocidad", 
+                                  bg="#3d3d3d", fg="white", font=("Arial", 11, "bold"))
+        vel_frame.pack(fill="x", padx=10, pady=5)
+        
+        self.vel_label = tk.Label(vel_frame, text=f"Velocidad: {self.velocidad_actual}/255", 
+                                 bg="#3d3d3d", fg="white", font=("Arial", 9))
+        self.vel_label.pack(pady=2)
+        
+        self.vel_slider = tk.Scale(vel_frame, from_=0, to=255, orient="horizontal",
+                                   bg="#3d3d3d", fg="white", troughcolor="#1e1e1e",
+                                   command=self.velocidad_changed, length=250)
+        self.vel_slider.set(200)
+        self.vel_slider.pack(padx=10, pady=2)
         
         # ===== SERVOS =====
         servo_frame = tk.LabelFrame(right_frame, text="🔧 Servos", 
                                     bg="#3d3d3d", fg="white", font=("Arial", 11, "bold"))
         servo_frame.pack(fill="x", padx=10, pady=5)
         
-        tk.Label(servo_frame, text="Cámara Frontal (0-30°)", 
-                bg="#3d3d3d", fg="white").pack(anchor="w", padx=10, pady=(5, 0))
-        self.servo1_slider = tk.Scale(servo_frame, from_=0, to=30, orient="horizontal",
+        tk.Label(servo_frame, text="Cam Frontal (0-30°)", 
+                bg="#3d3d3d", fg="white", font=("Arial", 8)).pack(anchor="w", padx=10, pady=(5, 0))
+        self.servo3_slider = tk.Scale(servo_frame, from_=0, to=30, orient="horizontal",
                                       bg="#3d3d3d", fg="white", troughcolor="#1e1e1e",
-                                      command=self.servo1_changed, length=250)
-        self.servo1_slider.set(15)
-        self.servo1_slider.pack(padx=10, pady=2)
+                                      command=self.servo3_changed, length=220)
+        self.servo3_slider.set(15)
+        self.servo3_slider.pack(padx=10, pady=2)
         
-        tk.Label(servo_frame, text="Cámara Superior (0-180°)", 
-                bg="#3d3d3d", fg="white").pack(anchor="w", padx=10, pady=(5, 0))
+        tk.Label(servo_frame, text="Cam Superior (0-180°)", 
+                bg="#3d3d3d", fg="white", font=("Arial", 8)).pack(anchor="w", padx=10, pady=(5, 0))
         self.servo4_slider = tk.Scale(servo_frame, from_=0, to=180, orient="horizontal",
                                       bg="#3d3d3d", fg="white", troughcolor="#1e1e1e",
-                                      command=self.servo4_changed, length=250)
+                                      command=self.servo4_changed, length=220)
         self.servo4_slider.set(90)
         self.servo4_slider.pack(padx=10, pady=2)
         
         # ===== MOVIMIENTO =====
-        mov_frame = tk.LabelFrame(right_frame, text="🕹️ Movimiento (WASD)", 
+        mov_frame = tk.LabelFrame(right_frame, text="🕹️ Movimiento", 
                                   bg="#3d3d3d", fg="white", font=("Arial", 11, "bold"))
         mov_frame.pack(fill="x", padx=10, pady=5)
         
         btn_frame = tk.Frame(mov_frame, bg="#3d3d3d")
-        btn_frame.pack(pady=10)
+        btn_frame.pack(pady=5)
         
-        tk.Button(btn_frame, text="▲", width=4, height=2, 
+        tk.Button(btn_frame, text="▲", width=3, height=1, 
                  command=lambda: self.comando_movimiento("avanzar")).grid(row=0, column=1, padx=2, pady=2)
         
-        tk.Button(btn_frame, text="◀", width=4, height=2,
+        tk.Button(btn_frame, text="◀", width=3, height=1,
                  command=lambda: self.comando_movimiento("izquierda")).grid(row=1, column=0, padx=2, pady=2)
-        tk.Button(btn_frame, text="■", width=4, height=2, bg="#ff4444",
+        tk.Button(btn_frame, text="■", width=3, height=1, bg="#ff4444",
                  command=lambda: self.comando_movimiento("stop")).grid(row=1, column=1, padx=2, pady=2)
-        tk.Button(btn_frame, text="▶", width=4, height=2,
+        tk.Button(btn_frame, text="▶", width=3, height=1,
                  command=lambda: self.comando_movimiento("derecha")).grid(row=1, column=2, padx=2, pady=2)
         
-        tk.Button(btn_frame, text="▼", width=4, height=2,
+        tk.Button(btn_frame, text="▼", width=3, height=1,
                  command=lambda: self.comando_movimiento("retroceder")).grid(row=2, column=1, padx=2, pady=2)
         
+        # ===== CAPTURA MANUAL =====
+        captura_frame = tk.LabelFrame(right_frame, text="📸 Captura Manual", 
+                                      bg="#3d3d3d", fg="white", font=("Arial", 11, "bold"))
+        captura_frame.pack(fill="x", padx=10, pady=5)
+        
+        tk.Button(captura_frame, text="📷 Capturar Imagen", 
+                 command=self.capturar_imagen_manual, bg="#2196F3", fg="white",
+                 font=("Arial", 9, "bold")).pack(padx=10, pady=5, fill="x")
+        
+        tk.Button(captura_frame, text="💾 Guardar Datos CSV", 
+                 command=self.guardar_datos_manual, bg="#4CAF50", fg="white",
+                 font=("Arial", 9, "bold")).pack(padx=10, pady=5, fill="x")
+        
         # ===== MARCADORES =====
-        marcador_frame = tk.LabelFrame(right_frame, text="🎯 Detección", 
+        marcador_frame = tk.LabelFrame(right_frame, text="🎯 Marcador Clave", 
                                        bg="#3d3d3d", fg="white", font=("Arial", 11, "bold"))
         marcador_frame.pack(fill="x", padx=10, pady=5)
         
-        tk.Label(marcador_frame, text="Marcador Clave:", 
-                bg="#3d3d3d", fg="white").pack(anchor="w", padx=10, pady=(5, 0))
+        tk.Label(marcador_frame, text="Tipo:", 
+                bg="#3d3d3d", fg="white", font=("Arial", 8)).pack(anchor="w", padx=10, pady=(5, 0))
         
         opciones = ["Cruz", "T", "Circulo", "Triangulo", "Cuadrado"]
         dropdown = ttk.Combobox(marcador_frame, textvariable=marcador_clave, 
-                               values=opciones, state="readonly", width=15)
+                               values=opciones, state="readonly", width=13)
         dropdown.pack(padx=10, pady=5)
         dropdown.current(2)
         
-        tk.Button(marcador_frame, text="📸 Capturar Marcador", 
-                 command=self.capturar_marcador, bg="#4CAF50", fg="white",
-                 font=("Arial", 10, "bold")).pack(padx=10, pady=10, fill="x")
+        tk.Button(marcador_frame, text="🎯 Detectar Marcador", 
+                 command=self.capturar_marcador, bg="#FF9800", fg="white",
+                 font=("Arial", 9, "bold")).pack(padx=10, pady=5, fill="x")
         
         # ===== SALIR =====
         tk.Button(right_frame, text="✖ SALIR", command=self.cerrar,
-                 bg="#d32f2f", fg="white", font=("Arial", 12, "bold"),
+                 bg="#d32f2f", fg="white", font=("Arial", 11, "bold"),
                  height=2).pack(side="bottom", fill="x", padx=10, pady=10)
     
     # ===== CALLBACKS =====
-    def servo1_changed(self, val):
+    def velocidad_changed(self, val):
+        self.velocidad_actual = int(float(val))
+        self.vel_label.config(text=f"Velocidad: {self.velocidad_actual}/255")
+        threading.Thread(target=lambda: enviar_comando(f"set_velocidad {self.velocidad_actual}"), daemon=True).start()
+    
+    def servo3_changed(self, val):
         angulo = int(float(val))
-        threading.Thread(target=lambda: enviar_comando(f"servo1 {angulo}"), daemon=True).start()
+        threading.Thread(target=lambda: enviar_comando(f"servo3 {angulo}"), daemon=True).start()
     
     def servo4_changed(self, val):
         angulo = int(float(val))
         threading.Thread(target=lambda: enviar_comando(f"servo4 {angulo}"), daemon=True).start()
     
     def comando_movimiento(self, comando):
-        threading.Thread(target=lambda: enviar_comando(comando), daemon=True).start()
+        # Enviar comando con velocidad actual
+        if comando in ["avanzar", "retroceder", "izquierda", "derecha"]:
+            cmd = f"{comando} {self.velocidad_actual}"
+        else:
+            cmd = comando
+        threading.Thread(target=lambda: enviar_comando(cmd), daemon=True).start()
     
     def tecla_presionada(self, event):
         tecla = event.keysym.lower()
@@ -659,6 +671,16 @@ class RoverClienteUI:
         
         if not self.teclas_activas:
             self.comando_movimiento("stop")
+    
+    def capturar_imagen_manual(self):
+        """Captura imagen manualmente"""
+        respuesta = enviar_comando("capturar_imagen")
+        messagebox.showinfo("Captura de Imagen", respuesta)
+    
+    def guardar_datos_manual(self):
+        """Guarda datos de sensores manualmente"""
+        respuesta = enviar_comando("guardar_datos")
+        messagebox.showinfo("Guardado de Datos", respuesta)
     
     def capturar_marcador(self):
         """Captura marcador de cámara frontal"""
@@ -689,12 +711,10 @@ class RoverClienteUI:
                               f"Marcador '{tipo}' guardado\n{respuesta}")
     
     def reset_odometria(self):
-        """Reinicia odometría"""
         odometria.reset()
         messagebox.showinfo("Reset", "Odometría reiniciada")
     
     def actualizar_mapa(self):
-        """Actualiza mapa de odometría"""
         try:
             estado_odom = odometria.obtener_estado()
             
@@ -702,29 +722,24 @@ class RoverClienteUI:
             self.ax.set_facecolor('#2d2d2d')
             self.ax.grid(True, alpha=0.3, color='white')
             
-            # Dibujar trayectoria
             if len(estado_odom['historial_x']) > 1:
                 self.ax.plot(estado_odom['historial_x'], 
                            estado_odom['historial_y'], 
                            'cyan', linewidth=2, label='Trayectoria')
             
-            # Dibujar posición actual
             x, y, theta = estado_odom['x'], estado_odom['y'], estado_odom['theta']
             
-            # Rover como triángulo
             arrow_len = 0.3
             dx = arrow_len * math.cos(theta)
             dy = arrow_len * math.sin(theta)
             self.ax.arrow(x, y, dx, dy, head_width=0.15, head_length=0.1,
                          fc='lime', ec='lime', linewidth=2)
             
-            # Dibujar obstáculos detectados
             for ox, oy, otheta, dist in estado_odom['distancias'][-20:]:
                 obs_x = ox + dist * math.cos(otheta)
                 obs_y = oy + dist * math.sin(otheta)
                 self.ax.plot(obs_x, obs_y, 'ro', markersize=4, alpha=0.6)
             
-            # Configurar ejes
             max_range = max(3.0, 
                           max(abs(x), abs(y)) + 1 if x != 0 or y != 0 else 3.0)
             self.ax.set_xlim(-max_range, max_range)
@@ -737,17 +752,15 @@ class RoverClienteUI:
             
             self.canvas_mapa.draw()
             
-            # Actualizar info
             angulo_grados = math.degrees(theta)
             self.odom_label.config(
                 text=f"Posición: ({x:.2f}, {y:.2f}) m | Ángulo: {angulo_grados:.1f}°"
             )
             
         except Exception as e:
-            print(f"[ERROR] Actualizar mapa: {e}")
+            pass
     
     def actualizar_gui(self):
-        """Actualiza GUI con frames y estado"""
         global frame_frontal, frame_superior, estado_rover
         
         # Actualizar video frontal
@@ -792,7 +805,7 @@ class RoverClienteUI:
         # Actualizar mapa
         self.actualizar_mapa()
         
-        self.root.after(33, self.actualizar_gui)
+        self.root.after(50, self.actualizar_gui)  # 20 FPS
     
     def cerrar(self):
         global running
@@ -802,11 +815,10 @@ class RoverClienteUI:
 # ==================== MAIN ====================
 if __name__ == "__main__":
     print("=" * 60)
-    print("   🤖 CLIENTE ROVER CON ODOMETRÍA")
+    print("   🤖 CLIENTE ROVER - SISTEMA COMPLETO")
     print("=" * 60)
     print(f"\n🔗 Conectando a servidor: {SERVER_IP}")
     
-    # Iniciar threads
     threading.Thread(target=recibir_video_frontal, daemon=True).start()
     threading.Thread(target=recibir_video_superior, daemon=True).start()
     threading.Thread(target=recibir_estado, daemon=True).start()
@@ -814,7 +826,6 @@ if __name__ == "__main__":
     
     time.sleep(1)
     
-    # Iniciar GUI
     root = tk.Tk()
     app = RoverClienteUI(root)
     
