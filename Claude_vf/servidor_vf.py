@@ -531,7 +531,7 @@ def servidor_video_frontal():
         conn, addr = srv.accept()
         print(f"[VIDEO FRONTAL] Cliente conectado: {addr}")
         
-        cap = cv2.VideoCapture(CAMERA_FRONTAL)
+        cap = cv2.VideoCapture(CAMERA_FRONTAL, cv2.CAP_V4L2)
         cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
         cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
         cap.set(cv2.CAP_PROP_FPS, 30)
@@ -601,7 +601,7 @@ def servidor_video_superior():
         conn, addr = srv.accept()
         print(f"[VIDEO SUPERIOR] Cliente conectado: {addr}")
         
-        cap = cv2.VideoCapture(CAMERA_SUPERIOR)
+        cap = cv2.VideoCapture(CAMERA_SUPERIOR, cv2.CAP_V4L2)
         cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
         cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
         cap.set(cv2.CAP_PROP_FPS, 30)
