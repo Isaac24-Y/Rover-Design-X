@@ -1,4 +1,4 @@
-# cliente_completo.py - Cliente MEJORADO con interfaz adaptable
+# cliente_completo.py - Cliente MEJORADO con interfaz responsive y requisitos completos
 import socket
 import struct
 import cv2
@@ -409,7 +409,7 @@ def actualizar_odometria_thread():
             print(f"[ERROR] Odometría: {e}")
             time.sleep(0.1)
 
-# ==================== INTERFAZ GRÁFICA MEJORADA ====================
+# ==================== INTERFAZ GRÁFICA RESPONSIVE ====================
 class RoverClienteUI:
     def __init__(self, root):
         global marcador_clave
@@ -417,19 +417,13 @@ class RoverClienteUI:
         self.root = root
         self.root.title("🤖 Control de Rover - Sistema Completo")
         
-        # Hacer ventana responsive
-        screen_width = root.winfo_screenwidth()
-        screen_height = root.winfo_screenheight()
+        # Configuración responsive MEJORADA
+        self.root.state('zoomed')  # Maximizar ventana en Windows/Linux
         
-        # Ajustar tamaño según pantalla
-        if screen_width < 1600:
-            window_width = int(screen_width * 0.95)
-            window_height = int(screen_height * 0.85)
-        else:
-            window_width = 1600
-            window_height = 900
+        # Forzar actualización de geometría
+        self.root.update_idletasks()
         
-        self.root.geometry(f"{window_width}x{window_height}")
+        # Color de fondo
         self.root.configure(bg="#1e1e1e")
         
         marcador_clave = tk.StringVar(value="Circulo")
@@ -438,10 +432,14 @@ class RoverClienteUI:
         # Variables de control de teclado mejoradas
         self.tecla_activa_actual = None
         self.ultimo_comando_tiempo = 0
-        self.debounce_delay = 0.1  # 100ms de debounce
+        self.debounce_delay = 0.1
         
         self.root.bind('<KeyPress>', self.tecla_presionada)
         self.root.bind('<KeyRelease>', self.tecla_liberada)
+        
+        # Configurar grid responsive
+        self.root.grid_rowconfigure(0, weight=1)
+        self.root.grid_columnconfigure(0, weight=1)
         
         self.crear_interfaz()
         self.actualizar_gui()
@@ -453,13 +451,15 @@ class RoverClienteUI:
         
         self.log_text.config(state='normal')
         self.log_text.insert('end', log_msg)
-        self.log_text.see('end')  # Auto-scroll
+        self.log_text.see('end')
         self.log_text.config(state='disabled')
         
     def crear_interfaz(self):
-        # Frame principal con scrollbar
+        # Contenedor principal con Canvas y Scrollbar
         main_canvas = tk.Canvas(self.root, bg="#1e1e1e", highlightthickness=0)
         scrollbar = ttk.Scrollbar(self.root, orient="vertical", command=main_canvas.yview)
+        
+        # Frame scrollable
         scrollable_frame = tk.Frame(main_canvas, bg="#1e1e1e")
         
         scrollable_frame.bind(
@@ -467,45 +467,58 @@ class RoverClienteUI:
             lambda e: main_canvas.configure(scrollregion=main_canvas.bbox("all"))
         )
         
-        main_canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+        canvas_frame = main_canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+        
+        # Hacer que el frame interno se expanda con el canvas
+        def on_canvas_configure(event):
+            canvas_width = event.width
+            main_canvas.itemconfig(canvas_frame, width=canvas_width)
+        
+        main_canvas.bind('<Configure>', on_canvas_configure)
         main_canvas.configure(yscrollcommand=scrollbar.set)
         
-        main_canvas.pack(side="left", fill="both", expand=True)
-        scrollbar.pack(side="right", fill="y")
+        # Pack canvas y scrollbar
+        main_canvas.grid(row=0, column=0, sticky="nsew")
+        scrollbar.grid(row=0, column=1, sticky="ns")
         
+        # Configurar grid del root
+        self.root.grid_rowconfigure(0, weight=1)
+        self.root.grid_columnconfigure(0, weight=1)
+        
+        # ===== LAYOUT PRINCIPAL EN GRID =====
         main_container = scrollable_frame
         
-        # ===== FILA SUPERIOR: VIDEOS =====
-        video_row = tk.Frame(main_container, bg="#1e1e1e")
-        video_row.pack(fill="x", padx=10, pady=5)
+        # Configurar grid responsive
+        main_container.grid_columnconfigure(0, weight=1, minsize=300)
+        main_container.grid_columnconfigure(1, weight=1, minsize=300)
+        main_container.grid_rowconfigure(0, weight=1)
+        main_container.grid_rowconfigure(1, weight=1)
         
-        # Video frontal
-        video_frontal_frame = tk.Frame(video_row, bg="#2d2d2d")
-        video_frontal_frame.pack(side="left", padx=5, fill="both", expand=True)
+        # ===== FILA 0: VIDEOS =====
+        # Video frontal (columna 0)
+        video_frontal_frame = tk.Frame(main_container, bg="#2d2d2d")
+        video_frontal_frame.grid(row=0, column=0, padx=5, pady=5, sticky="nsew")
         
-        tk.Label(video_frontal_frame, text="📹 CÁMARA FRONTAL", 
+        tk.Label(video_frontal_frame, text="🎥 CÁMARA FRONTAL", 
                 bg="#2d2d2d", fg="white", font=("Arial", 11, "bold")).pack(pady=3)
         
         self.video_frontal = tk.Label(video_frontal_frame, bg="black")
-        self.video_frontal.pack(padx=5, pady=5)
+        self.video_frontal.pack(padx=5, pady=5, expand=True)
         
-        # Video superior
-        video_superior_frame = tk.Frame(video_row, bg="#2d2d2d")
-        video_superior_frame.pack(side="left", padx=5, fill="both", expand=True)
+        # Video superior (columna 1)
+        video_superior_frame = tk.Frame(main_container, bg="#2d2d2d")
+        video_superior_frame.grid(row=0, column=1, padx=5, pady=5, sticky="nsew")
         
-        tk.Label(video_superior_frame, text="📹 CÁMARA SUPERIOR", 
+        tk.Label(video_superior_frame, text="🎥 CÁMARA SUPERIOR", 
                 bg="#2d2d2d", fg="white", font=("Arial", 11, "bold")).pack(pady=3)
         
         self.video_superior = tk.Label(video_superior_frame, bg="black")
-        self.video_superior.pack(padx=5, pady=5)
+        self.video_superior.pack(padx=5, pady=5, expand=True)
         
-        # ===== FILA INFERIOR: MAPA + CONTROLES + LOG =====
-        bottom_row = tk.Frame(main_container, bg="#1e1e1e")
-        bottom_row.pack(fill="both", expand=True, padx=10, pady=5)
-        
-        # COLUMNA 1: MAPA
-        map_frame = tk.Frame(bottom_row, bg="#2d2d2d")
-        map_frame.pack(side="left", fill="both", expand=True, padx=5)
+        # ===== FILA 1: MAPA + CONTROLES + LOG =====
+        # Mapa (columna 0)
+        map_frame = tk.Frame(main_container, bg="#2d2d2d")
+        map_frame.grid(row=1, column=0, padx=5, pady=5, sticky="nsew")
         
         tk.Label(map_frame, text="🗺️ MAPA DE ODOMETRÍA", 
                 bg="#2d2d2d", fg="#00ff00", font=("Arial", 12, "bold")).pack(pady=5)
@@ -530,15 +543,23 @@ class RoverClienteUI:
                  command=self.reset_odometria,
                  bg="#ff9800", fg="white", font=("Arial", 9, "bold")).pack(pady=3)
         
-        # COLUMNA 2: CONTROLES
-        control_frame = tk.Frame(bottom_row, bg="#2d2d2d", width=300)
-        control_frame.pack(side="left", fill="y", padx=5)
-        control_frame.pack_propagate(False)
+        # Controles + Log (columna 1) - Frame contenedor
+        control_log_container = tk.Frame(main_container, bg="#1e1e1e")
+        control_log_container.grid(row=1, column=1, padx=5, pady=5, sticky="nsew")
+        
+        # Dividir en dos partes: controles (izquierda) y log (derecha)
+        control_log_container.grid_columnconfigure(0, weight=1)
+        control_log_container.grid_columnconfigure(1, weight=1)
+        control_log_container.grid_rowconfigure(0, weight=1)
+        
+        # CONTROLES
+        control_frame = tk.Frame(control_log_container, bg="#2d2d2d")
+        control_frame.grid(row=0, column=0, padx=5, sticky="nsew")
         
         tk.Label(control_frame, text="🎮 CONTROL", 
                 bg="#2d2d2d", fg="#00ff00", font=("Arial", 14, "bold")).pack(pady=5)
         
-        # Sensores (compacto)
+        # Sensores
         sensores_frame = tk.LabelFrame(control_frame, text="📊 Sensores", 
                                        bg="#3d3d3d", fg="white", font=("Arial", 10, "bold"))
         sensores_frame.pack(fill="x", padx=5, pady=3)
@@ -587,7 +608,7 @@ class RoverClienteUI:
         self.vel_slider.set(200)
         self.vel_slider.pack(padx=5, pady=1)
         
-        # Servos (compacto)
+        # Servos
         servo_frame = tk.LabelFrame(control_frame, text="🔧 Servos", 
                                     bg="#3d3d3d", fg="white", font=("Arial", 10, "bold"))
         servo_frame.pack(fill="x", padx=5, pady=3)
@@ -634,18 +655,21 @@ class RoverClienteUI:
                                       bg="#3d3d3d", fg="white", font=("Arial", 10, "bold"))
         captura_frame.pack(fill="x", padx=5, pady=3)
         
-        tk.Button(captura_frame, text="📷 Capturar", 
+        tk.Button(captura_frame, text="📷 Capturar Foto", 
                  command=self.capturar_imagen_manual, bg="#2196F3", fg="white",
                  font=("Arial", 8, "bold")).pack(padx=5, pady=2, fill="x")
         
-        tk.Button(captura_frame, text="💾 Guardar CSV", 
+        tk.Button(captura_frame, text="💾 Guardar Datos CSV", 
                  command=self.guardar_datos_manual, bg="#4CAF50", fg="white",
                  font=("Arial", 8, "bold")).pack(padx=5, pady=2, fill="x")
         
         # Marcador
-        marcador_frame = tk.LabelFrame(control_frame, text="🎯 Marcador Clave", 
+        marcador_frame = tk.LabelFrame(control_frame, text="🎯 Detección de Marcador", 
                                        bg="#3d3d3d", fg="white", font=("Arial", 10, "bold"))
         marcador_frame.pack(fill="x", padx=5, pady=3)
+        
+        tk.Label(marcador_frame, text="Marcador Clave:", 
+                bg="#3d3d3d", fg="white", font=("Arial", 8)).pack(anchor="w", padx=5)
         
         opciones = ["Cruz", "T", "Circulo", "Triangulo", "Cuadrado"]
         dropdown = ttk.Combobox(marcador_frame, textvariable=marcador_clave, 
@@ -653,7 +677,7 @@ class RoverClienteUI:
         dropdown.pack(padx=5, pady=2)
         dropdown.current(2)
         
-        tk.Button(marcador_frame, text="🎯 Detectar", 
+        tk.Button(marcador_frame, text="🎯 Detectar Marcador", 
                  command=self.capturar_marcador, bg="#FF9800", fg="white",
                  font=("Arial", 8, "bold")).pack(padx=5, pady=2, fill="x")
         
@@ -662,9 +686,9 @@ class RoverClienteUI:
                  bg="#d32f2f", fg="white", font=("Arial", 10, "bold"),
                  height=2).pack(side="bottom", fill="x", padx=5, pady=5)
         
-        # COLUMNA 3: LOG DE ACCIONES
-        log_frame = tk.Frame(bottom_row, bg="#2d2d2d", width=350)
-        log_frame.pack(side="right", fill="both", expand=True, padx=5)
+        # LOG DE ACCIONES
+        log_frame = tk.Frame(control_log_container, bg="#2d2d2d")
+        log_frame.grid(row=0, column=1, padx=5, sticky="nsew")
         
         tk.Label(log_frame, text="📋 LOG DE ACCIONES", 
                 bg="#2d2d2d", fg="#00ff00", font=("Arial", 12, "bold")).pack(pady=5)
@@ -673,8 +697,8 @@ class RoverClienteUI:
         self.log_text = scrolledtext.ScrolledText(
             log_frame, 
             wrap=tk.WORD, 
-            width=40, 
-            height=25,
+            width=35, 
+            height=30,
             bg="#1e1e1e", 
             fg="#00ff00",
             font=("Consolas", 9),
@@ -690,6 +714,7 @@ class RoverClienteUI:
         # Log inicial
         self.agregar_log_ui("✓ Sistema iniciado")
         self.agregar_log_ui("⌨️ Usa WASD o Flechas para controlar")
+        self.agregar_log_ui("🎯 Selecciona marcador clave y detecta")
     
     def limpiar_log(self):
         """Limpia el log visual"""
@@ -745,7 +770,7 @@ class RoverClienteUI:
         tecla = event.keysym.lower()
         tiempo_actual = time.time()
         
-        # Debounce: ignorar si es muy rápido
+        # Debounce
         if tiempo_actual - self.ultimo_comando_tiempo < self.debounce_delay:
             return
         
@@ -777,7 +802,7 @@ class RoverClienteUI:
     def capturar_imagen_manual(self):
         def ejecutar():
             respuesta = enviar_comando("capturar_imagen")
-            self.agregar_log_ui(f"📷 Captura: {respuesta}")
+            self.agregar_log_ui(f"📷 {respuesta}")
             self.root.after(0, lambda: messagebox.showinfo("Captura", respuesta))
         
         threading.Thread(target=ejecutar, daemon=True).start()
@@ -785,7 +810,7 @@ class RoverClienteUI:
     def guardar_datos_manual(self):
         def ejecutar():
             respuesta = enviar_comando("guardar_datos")
-            self.agregar_log_ui(f"💾 Guardado CSV: {respuesta}")
+            self.agregar_log_ui(f"💾 {respuesta}")
             self.root.after(0, lambda: messagebox.showinfo("Guardado", respuesta))
         
         threading.Thread(target=ejecutar, daemon=True).start()
@@ -808,12 +833,14 @@ class RoverClienteUI:
         h, w = frame_frontal.shape[:2]
         es_clave = (tipo == marcador_clave.get())
         
-        comando = f"marcador:{tipo}:{w}:{h}:{'true' if es_clave else 'false'}"
+        # PIXELSU = cx (columna), PIXELSV = cy (fila)
+        comando = f"marcador:{tipo}:{cx}:{cy}:{'true' if es_clave else 'false'}"
         
         def ejecutar():
             respuesta = enviar_comando(comando)
             if es_clave:
-                self.agregar_log_ui(f"🎯 MARCADOR CLAVE '{tipo}' → Secuencia autónoma iniciada")
+                self.agregar_log_ui(f"🎯 MARCADOR CLAVE '{tipo}' detectado")
+                self.agregar_log_ui(f"🤖 Iniciando secuencia autónoma...")
                 self.root.after(0, lambda: messagebox.showinfo("🎯 Marcador Clave", 
                                   f"Marcador clave '{tipo}' detectado!\nIniciando secuencia autónoma..."))
             else:
@@ -876,14 +903,14 @@ class RoverClienteUI:
     def actualizar_gui(self):
         global frame_frontal, frame_superior, estado_rover
         
-        # Calcular tamaño de video adaptable con validación
+        # Tamaño de video adaptable mejorado
         root_width = self.root.winfo_width()
-        if root_width <= 1:  # Ventana aún no renderizada
+        if root_width <= 1:
             video_width = 480
         else:
-            video_width = min(480, int(root_width * 0.3))
+            video_width = min(600, int(root_width * 0.35))
         
-        video_width = max(320, video_width)  # Mínimo 320px
+        video_width = max(320, video_width)
         video_height = int(video_width * 0.75)
         
         # Actualizar video frontal
@@ -921,6 +948,15 @@ class RoverClienteUI:
                 
                 marcadores = estado_rover.get('marcadores_detectados', 0)
                 self.marcadores_label.config(text=f"🎯 Marcadores: {marcadores}")
+                
+                # Actualizar log con último mensaje del servidor
+                ultimo_log = estado_rover.get('ultimo_log', '')
+                if ultimo_log and hasattr(self, '_ultimo_log_visto'):
+                    if ultimo_log != self._ultimo_log_visto:
+                        self.agregar_log_ui(f"📡 Servidor: {ultimo_log}")
+                        self._ultimo_log_visto = ultimo_log
+                elif not hasattr(self, '_ultimo_log_visto'):
+                    self._ultimo_log_visto = ultimo_log
         
         # Actualizar mapa
         self.actualizar_mapa()
@@ -936,7 +972,7 @@ class RoverClienteUI:
 # ==================== MAIN ====================
 if __name__ == "__main__":
     print("=" * 60)
-    print("   🤖 CLIENTE ROVER - SISTEMA MEJORADO")
+    print("   🤖 CLIENTE ROVER - SISTEMA COMPLETO RESPONSIVE")
     print("=" * 60)
     print(f"\n🔗 Conectando a servidor: {SERVER_IP}")
     
