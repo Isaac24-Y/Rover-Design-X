@@ -1,25 +1,8 @@
 /*
  * ============================================================
  *  ROVER DE EXPLORACIÓN - ARDUINO NANO
- *  Compatible con Raspberry Pi via Serial
+ *  Versión Completa y Corregida
  * ============================================================
- * 
- * HARDWARE:
- * - 2 Puentes H para motores (izquierda y derecha)
- * - 4 Servos:
- *   · Servo1 (pin 2): Codo brazo (0-180°)
- *   · Servo2 (pin 3): Sensor brazo (0-180°)
- *   · Servo3 (pin 4): Cámara frontal (0-30°)
- *   · Servo4 (pin 11): Cámara superior (0-180°)
- * - Sensores:
- *   · DHT11 (pin 8): Temperatura
- *   · Capacitivo (A0): Humedad
- *   · LDR (A1): Luz
- *   · VL53L0X (I2C): Distancia láser
- *   · MPU6050 (I2C): Acelerómetro y giroscopio
- * - Motores DC (PWM):
- *   · Motor A (pins 5, 6): Lado izquierdo
- *   · Motor B (pins 10, 11): Lado derecho
  */
 
 #include <Servo.h>
@@ -29,32 +12,37 @@
 #include <MPU6050.h>
 
 // =====================================================
-// DEFINICIONES Y CONSTANTES
+// SERVOS
 // =====================================================
+Servo servo1;  // Codo brazo (0-180°)
+Servo servo2;  // Sensor brazo (0-180°)
+Servo servo3;  // Cámara frontal (0-30°)
+Servo servo4;  // Cámara superior (0-180°)
 
-// Servos
-Servo servo1;  // Codo brazo
-Servo servo2;  // Sensor brazo
-Servo servo3;  // Cámara frontal
-Servo servo4;  // Cámara superior
-
-// Sensores
+// =====================================================
+// SENSORES
+// =====================================================
 dht DHT;
 Adafruit_VL53L0X lox = Adafruit_VL53L0X();
 MPU6050 mpu;
 
-// Pines de sensores
 const int PIN_TEMP = 8;
 const int PIN_HUMEDAD = A0;
 const int PIN_LUZ = A1;
 
-// Pines de motores (PWM)
-const int MOTOR_A1 = 3;   // Motor izquierdo adelante
-const int MOTOR_A2 = 5;   // Motor izquierdo atrás
-const int MOTOR_B1 = 11;  // Motor derecho adelante
-const int MOTOR_B2 = 6;  // Motor derecho atrás
+// =====================================================
+// MOTORES DC (PWM)
+// =====================================================
+// Motor A = Izquierdo
+const int MOTOR_A1 = 5;   // Adelante
+const int MOTOR_A2 = 6;   // Atrás
+// Motor B = Derecho
+const int MOTOR_B1 = 10;  // Adelante
+const int MOTOR_B2 = 11;  // Atrás
 
-// Variables de estado MPU
+// =====================================================
+// VARIABLES MPU6050
+// =====================================================
 int16_t ax, ay, az;
 int16_t gx, gy, gz;
 
@@ -65,16 +53,16 @@ void setup() {
   Serial.begin(9600);
   
   // Inicializar servos
-  servo1.attach(4);
-  servo2.attach(2);
-  servo3.attach(7);
-  servo4.attach(12);
+  servo1.attach(2);
+  servo2.attach(3);
+  servo3.attach(4);
+  servo4.attach(9);
   
-  // Posiciones iniciales seguras
-  servo1.write(0);    // Brazo codo replegado
-  servo2.write(0);    // Brazo sensor replegado
-  servo3.write(15);   // Cámara frontal centro
-  servo4.write(90);   // Cámara superior centro
+  // Posiciones iniciales
+  servo1.write(0);
+  servo2.write(0);
+  servo3.write(15);
+  servo4.write(90);
   
   // Configurar pines de motores
   pinMode(MOTOR_A1, OUTPUT);
@@ -82,7 +70,7 @@ void setup() {
   pinMode(MOTOR_B1, OUTPUT);
   pinMode(MOTOR_B2, OUTPUT);
   
-  // Motores inicialmente detenidos
+  // Detener motores
   detenerMotores();
   
   // Inicializar MPU6050
@@ -107,48 +95,55 @@ void setup() {
 }
 
 // =====================================================
-// FUNCIONES DE MOTORES
+// FUNCIONES DE MOTORES - CORREGIDAS
 // =====================================================
 
 void detenerMotores() {
-  digitalWrite(MOTOR_A1, LOW);
-  digitalWrite(MOTOR_A2, LOW);
-  digitalWrite(MOTOR_B1, LOW);
-  digitalWrite(MOTOR_B2, LOW);
+  // Apagar todos los pines
+  analogWrite(MOTOR_A1, 0);
+  analogWrite(MOTOR_A2, 0);
+  analogWrite(MOTOR_B1, 0);
+  analogWrite(MOTOR_B2, 0);
 }
 
 void avanzar(int vel) {
-  //vel = constrain(vel, 0, 255);
-  analogWrite(MOTOR_A1, vel);
+  vel = constrain(vel, 0, 255);
+  
+  // Ambos motores adelante
+  analogWrite(MOTOR_A1, vel);  // Izquierdo adelante
   analogWrite(MOTOR_A2, 0);
+  analogWrite(MOTOR_B1, vel);  // Derecho adelante
   analogWrite(MOTOR_B2, 0);
-  analogWrite(MOTOR_B1, vel);
 }
 
 void retroceder(int vel) {
-  //vel = constrain(vel, 0, 255);
+  vel = constrain(vel, 0, 255);
+  
+  // Ambos motores atrás
   analogWrite(MOTOR_A1, 0);
-  analogWrite(MOTOR_A2, vel);
-  analogWrite(MOTOR_B2, vel);
+  analogWrite(MOTOR_A2, vel);  // Izquierdo atrás
   analogWrite(MOTOR_B1, 0);
+  analogWrite(MOTOR_B2, vel);  // Derecho atrás
 }
 
 void girarIzquierda(int vel) {
-  //vel = constrain(vel, 0, 255);
-  // Motor izquierdo atrás, derecho adelante
-  analogWrite(MOTOR_A1, vel);
-  analogWrite(MOTOR_A2, 0);
-  analogWrite(MOTOR_B2, vel);
-  analogWrite(MOTOR_B1, 0);
+  vel = constrain(vel, 0, 255);
+  
+  // Izquierdo atrás, Derecho adelante (giro en el lugar)
+  analogWrite(MOTOR_A1, 0);
+  analogWrite(MOTOR_A2, vel);  // Izquierdo atrás
+  analogWrite(MOTOR_B1, vel);  // Derecho adelante
+  analogWrite(MOTOR_B2, 0);
 }
 
 void girarDerecha(int vel) {
-  //vel = constrain(vel, 0, 255);
-  // Motor izquierdo adelante, derecho atrás
-  analogWrite(MOTOR_B1, vel);
-  analogWrite(MOTOR_B2, 0);
-  analogWrite(MOTOR_A2, vel);
-  analogWrite(MOTOR_A1, 0);
+  vel = constrain(vel, 0, 255);
+  
+  // Izquierdo adelante, Derecho atrás (giro en el lugar)
+  analogWrite(MOTOR_A1, vel);  // Izquierdo adelante
+  analogWrite(MOTOR_A2, 0);
+  analogWrite(MOTOR_B1, 0);
+  analogWrite(MOTOR_B2, vel);  // Derecho atrás
 }
 
 // =====================================================
@@ -160,12 +155,11 @@ float leerTemperatura() {
   if (chk == DHTLIB_OK) {
     return DHT.temperature;
   }
-  return -999;  // Error
+  return -999;
 }
 
 int leerHumedad() {
   int lectura = analogRead(PIN_HUMEDAD);
-  // Mapear de valores ADC a porcentaje
   // Calibración: 588 = 0%, 308 = 100%
   int humedad = map(lectura, 588, 308, 0, 100);
   return constrain(humedad, 0, 100);
@@ -173,7 +167,6 @@ int leerHumedad() {
 
 int leerLuz() {
   int lectura = analogRead(PIN_LUZ);
-  // Mapear de ADC a voltaje aproximado (0-5V)
   // 1023 = oscuro, 0 = brillante
   int luz = map(lectura, 1023, 0, 0, 100);
   return constrain(luz, 0, 100);
@@ -183,10 +176,10 @@ float leerDistancia() {
   VL53L0X_RangingMeasurementData_t medida;
   lox.rangingTest(&medida, false);
   
-  if (medida.RangeStatus != 4) {  // 4 = fuera de rango
+  if (medida.RangeStatus != 4) {
     return medida.RangeMilliMeter;
   }
-  return -1;  // Error o fuera de rango
+  return -1;
 }
 
 void leerMPU() {
@@ -220,11 +213,11 @@ void procesarComando(String comando) {
     retroceder(valor > 0 ? valor : 200);
     Serial.println("OK: Retrocediendo");
   }
-  else if (accion == "izquierda" || accion == "izq") {
+  else if (accion == "izquierda") {
     girarIzquierda(valor > 0 ? valor : 200);
     Serial.println("OK: Girando izquierda");
   }
-  else if (accion == "derecha" || accion == "der") {
+  else if (accion == "derecha") {
     girarDerecha(valor > 0 ? valor : 200);
     Serial.println("OK: Girando derecha");
   }
@@ -311,6 +304,36 @@ void procesarComando(String comando) {
     Serial.print("Dist: "); Serial.print(leerDistancia()); Serial.println(" mm");
   }
   
+  // ========== TEST MOTORES ==========
+  else if (accion == "test_motores") {
+    Serial.println("=== TEST DE MOTORES ===");
+    
+    Serial.println("Avanzar 2s...");
+    avanzar(150);
+    delay(2000);
+    detenerMotores();
+    delay(500);
+    
+    Serial.println("Retroceder 2s...");
+    retroceder(150);
+    delay(2000);
+    detenerMotores();
+    delay(500);
+    
+    Serial.println("Izquierda 2s...");
+    girarIzquierda(150);
+    delay(2000);
+    detenerMotores();
+    delay(500);
+    
+    Serial.println("Derecha 2s...");
+    girarDerecha(150);
+    delay(2000);
+    detenerMotores();
+    
+    Serial.println("Test completado");
+  }
+  
   // ========== COMANDO DESCONOCIDO ==========
   else {
     Serial.print("ERROR: Comando desconocido: ");
@@ -327,6 +350,5 @@ void loop() {
     procesarComando(comando);
   }
   
-  // Pequeño delay para estabilidad
   delay(10);
 }

@@ -1,0 +1,1 @@
+[06:31:19] Error conectando Arduino: module 'serial' has no attribute 'Serial'
